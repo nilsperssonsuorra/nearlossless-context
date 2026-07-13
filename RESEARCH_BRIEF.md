@@ -75,6 +75,8 @@ Workstation: interactive full-KV jobs prefer **\(L \le 4\mathrm{k}\)** unless ch
 
 **Smoke result:** `results/h1_oracle_20260713T214610Z.json` → verdict **`H1_NEEDS_LOCAL_CONTEXT`**.
 
+**Radius sweep (H1′):** `experiments/bench_h1_radius.py` → **\(R^* = 1\)** token of local context around critical spans restores ε=0 on depths {0, 0.5, 1.0} at \(L≈4\mathrm{k}\). \(R=0\) fails on start/mid (hallucinated trailing digit). See `results/h1_radius_*.json`.
+
 **Why this could matter at frontier scale:**  
 If true, cheap long context is **not** “store a bit less of everything”; it is **guarantee critical spans + question/recent + sinks**, and spend remaining bytes optimally. That drives detectors, controllers, and training objectives — not another generic top-k.
 
@@ -129,6 +131,8 @@ A claim that SnapKV is new, or that int8 is new. Those are tools for testing H1.
 | Necessity fails | Rebuild suite until gold requires the span |
 | H1 only works for single needle | H3: multi-hop needs **relational** retention (edges, not entities) |
 
+**Status (2026-07-13):** H1 → `H1_NEEDS_LOCAL_CONTEXT` with \(R^*=1\). H2 → **`H2_SUPPORTED`** (`results/h2_bytes_20260713T224808Z`): priority±R\* matches full; volume that avoids critical fails even at 2× tokens. **Next:** raise measured \(L_\varepsilon\) with a non-oracle scorer, then H3 multi-hop.
+
 Do **not** add new methods until the kill experiment is green or H1 is revised.
 
 ---
@@ -147,7 +151,7 @@ Do **not** add new methods until the kill experiment is green or H1 is revised.
 
 ## 7. Related work (one paragraph)
 
-Training-free KV eviction (StreamingLLM, H2O, SnapKV, PyramidKV, Ada-KV, RocketKV, …) and KV quantization (KIVI, FP8/INT cache, …) already make context cheaper. **None of that is our discovery claim.** We use them as baselines and tools. Our claim is about **what must be retained for near-lossless retrieval under a budget** (H1), then **how to spend remaining bytes** (later H2) to raise \(L_\varepsilon\).
+Training-free KV eviction (StreamingLLM, H2O, SnapKV, PyramidKV, Ada-KV, RocketKV, …) and KV quantization (KIVI, FP8/INT cache, …) already make context cheaper. **None of that is our discovery claim.** We use them as baselines and tools. Our claim is about **what must be retained for near-lossless retrieval under a budget** (H1: critical±R\*), then **how to spend remaining bytes** (H2: priority beats volume) to raise \(L_\varepsilon\).
 
 ---
 

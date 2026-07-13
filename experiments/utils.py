@@ -44,9 +44,16 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
         return
-    keys = list(rows[0].keys())
+    # Union of keys so later rows can add fields (e.g. keep_count)
+    keys: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        for k in row.keys():
+            if k not in seen:
+                seen.add(k)
+                keys.append(k)
     with path.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=keys)
+        w = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
 

@@ -64,18 +64,24 @@ pip install -r requirements.txt
 | Script | Purpose |
 |--------|---------|
 | `experiments/bench_h1_oracle.py` | **H1 kill experiment** (oracle / anti-oracle spans) |
+| `experiments/bench_h1_radius.py` | **H1′** minimum local radius \(R\) around critical spans |
+| `experiments/bench_h2_bytes.py` | **H2** equal-byte: priority (crit±R\*) vs volume |
 | `experiments/bench_ceiling.py` | Dense full-KV ceiling: VRAM / speed / needle vs \(L\) |
 | `experiments/bench_context_tax.py` | Decode/VRAM tax vs length |
 | `experiments/bench_compare.py` | Full vs recent vs SnapKV-style (≤4k) |
 | `experiments/bench_needle.py` | Needle-in-a-haystack smoke |
 | `experiments/bench_equal_byte.py` | Quality vs KV budget |
-| `experiments/bytebudget.py` | Tooling for later H2 (bytes) — not the discovery claim |
+| `experiments/bytebudget.py` | ByteBudget tooling (int8 logical) |
 
-### H1 kill experiment (do this before new methods)
+### H1 / H1′ / H2 (theory track)
 
 ```powershell
 python experiments\bench_h1_oracle.py --ctx 4096 --depths 0.0,0.5,1.0
+python experiments\bench_h1_radius.py --ctx 4096 --radii 0,1,2,4,8,16
+python experiments\bench_h2_bytes.py --ctx 4096 --depths 0.0,0.5,1.0 --R 1
 ```
+
+Latest: **\(R^*=1\)** restores ε=0; **H2_SUPPORTED** — priority±R\* beats equal/2× volume that misses critical spans.
 
 ### Ceiling map
 
@@ -100,12 +106,12 @@ Outputs: `results/*.csv` + `*.json` (gitignored). Narrative: `results/FINDINGS.m
 ## Status (lab so far)
 
 - Runnable HF lab on 3090; DynamicCache + RoPE/mask footguns documented and fixed for compression paths  
-- Measured **context tax** (longer → slower decode / more VRAM)  
-- Implemented **full / recent / SnapKV-style / ByteBudget** prototypes  
-- Needle suite @4k: SnapKV and ByteBudget can match full on single-needle after fixes; recent only works at end  
-- ByteBudget shows **~2× logical KV bytes** vs bf16 at equal slots (still dequants for HF decode)  
+- **H1 / H1′:** critical spans need local radius \(R^*=1\); bare fact tokens insufficient  
+- **H2:** at fixed bytes, priority (crit±R\*) beats equal/2× volume without critical spans  
+- Full-KV ceiling ~4k measured; \(L_{\max}\) est. ~8.7k at 22 GB (not yet run)  
+- SnapKV / ByteBudget match full on single-needle when they retain the right spans  
 
-**Next (goal-aligned):** dense **ceiling map** — max \(L\) at ε≈0 for full KV (then near-lossless quant), not more eviction tweaks.
+**Next (goal-aligned):** non-oracle scorer that recovers critical±R\* → measure raised \(L_\varepsilon\) under fixed VRAM; then multi-hop (H3).
 
 ---
 
