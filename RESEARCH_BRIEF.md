@@ -1,292 +1,166 @@
-# Cheap Long Context on a Single RTX 3090
+# nearlossless-context — research brief
 
-**Status:** research brief (literature reviewed 2026-07-13)  
-**Hardware:** RTX 3090 24 GB VRAM + 32 GB system RAM  
-**Goal:** Invent a method that makes long context cheaper — higher usable context and less decode slowdown — without tanking quality.
+**Repo:** private `nearlossless-context`  
+**Lab:** RTX 3090 24 GB + 32 GB RAM · primary model `Qwen/Qwen3-4B-Instruct-2507`  
+**Updated:** 2026-07-13  
 
----
-
-## 1. One-sentence project claim (target)
-
-> Under a **fixed byte budget** of KV memory (what actually limits a 3090), allocating **both token slots and bit-width per head/layer** beats uniform token budgets and uniform quant, yielding higher LongBench/RULER quality *and* flatter decode tok/s as context grows.
-
-**Working name:** `ByteBudgetKV` (or `HeteroKV`)  
-**Not:** “another SnapKV” or “Ada-KV but we rename it.”
+This document is the **north star**. Implementation details live in `README.md` and `results/FINDINGS.md`. Related work notes live in `papers/NOTES.md`.
 
 ---
 
-## 2. Hardware reality (3090 + 32 GB)
+## 1. Problem (why anyone should care)
 
-| Resource | Budget | Implication |
-|----------|--------|-------------|
-| GPU VRAM | 24 GB | Weights + activations + KV must share this |
-| System RAM | 32 GB | Limited CPU offload; don’t plan multi-100B full KV on CPU |
-| Memory bandwidth | GDDR6X (not HBM) | Decode is **very** memory-bound; RocketKV notes consumer cards should benefit *more* than A100/H100 from KV traffic cuts |
+Long context is expensive: KV memory and bandwidth dominate decode cost as \(L\) grows; prefill cost grows with prompt length. Frontier and local serving both pay this tax.
 
-### Model strategy: one model to prove the theory
+**Product-shaped goal (lab):** run a small model with **much larger usable \(L\)** at **near–full-KV quality**.  
+**Science-shaped goal:** find a **mechanism or law** that makes long memory cheap **without silent quality loss** — something that would still matter at larger scale, not only on a 4B + 3090.
 
-**Rule:** Invent and validate on **exactly one primary model**.  
-Multi-model is only a later “does it transfer?” check — not week 1–6.
-
-#### Why small (2B/4B), not 27B/35B, for theory
-
-| | Small (2B–4B) | Huge (27B+) |
-|--|---------------|-------------|
-| Iteration | Fast | Slow |
-| VRAM for **long context** | Lots — can hit 32k–128k | Weights eat the card |
-| Debug / log attention | Easy | Painful |
-| Theory (budgets, bytes, quant) | Same math | Same math |
-| Impressive demo | Later | After theory works |
-
-KV compression is about **attention + memory**, not max model IQ.  
-Prove ByteBudgetKV on one small model first.
-
-#### Locked primary
-
-| | Model |
-|--|--------|
-| **PRIMARY** | **Qwen3.5-4B** Instruct |
-| Fallback only | **Qwen3.5-2B** if 4B flaky, or **9B** if 4B too weak to measure LongBench/NIAH gaps |
-
-**Not in theory phase:** 27B, 35B-A3B, Gemma 4 mid/large, multi-model sweeps.
-
-#### Later (only if phase 1 wins)
-
-| Phase | Model | Why |
-|-------|--------|-----|
-| 2 | **One** of: Qwen3.6-27B Q4 *or* Gemma 4 26B-A4B | Real weight pressure on 24 GB |
-| 3 | Optional second family | Transfer / appendix |
+Hiring is **not** guaranteed by this. Strong theory + ruthless experiments on a problem labs actually pay for is **aligned** with how research engineers get interviews. That is the bar we optimize for.
 
 ---
 
-## 3. Literature notes (papers actually read)
+## 2. One success metric (hire-aligned)
 
-### 3.1 SnapKV — *LLM Knows What You Are Looking For Before Generation*  
-**arXiv:** [2404.14469](https://arxiv.org/abs/2404.14469) · NeurIPS 2024
+Define:
 
-| Item | Detail |
-|------|--------|
-| **Insight** | Important prompt KV positions are predictable from a short **observation window** at the end of the prompt; pattern is stable during generation |
-| **Method** | Per-head vote from obs-window attention → top-k on prefix → **pooling/clustering** so neighbors of peaks are kept → concat with full obs window |
-| **Claimed wins** | ~3.6× gen speed, ~8.2× memory efficiency @ 16k; ~380k tokens on A100-80GB HF with ~1k budget; LongBench near full-KV |
-| **Limitation** | Permanent eviction; multi-query / multi-turn importance can shift; mostly **uniform token budget per head**; focuses on prompt compression more than decode-phase dynamics |
-| **Code** | https://github.com/FasterDecoding/SnapKV |
+- \(\mathrm{Full}(L)\): full KV (bf16/fp16) at length \(L\) — **gold quality**  
+- \(\mathrm{Q}(M, L)\): quality of method \(M\) at length \(L\) on suite \(\mathcal{S}\)  
+- \(R(M, L)\): resource cost (prefer **peak KV bytes** and/or **decode bytes/step**; also report peak VRAM and tok/s)  
+- \(\varepsilon\): allowed relative quality gap (start with **ε = 0 on retrieval-critical tasks**, and ε ≤ 0.02 on softer tasks once suite expands)
 
-**Takeaway for us:** Best single-stage permanent eviction baseline. Pooling matters (keeps local context integrity).
+**Primary metric:**
 
----
+\[
+\text{Success} = \text{maximize } L_{\varepsilon}
+\quad\text{where}\quad
+L_{\varepsilon} = \max\{ L : \mathrm{Q}(M,L) \ge (1-\varepsilon)\,\mathrm{Q}(\mathrm{Full},L) \}
+\]
+under hardware constraint (≤24 GB, usable speed).
 
-### 3.2 PyramidKV — *Dynamic KV Cache Compression based on Pyramidal Information Funneling*  
-**arXiv:** [2406.02069](https://arxiv.org/abs/2406.02069)
+**Secondary metric (same quality, less cost):**
 
-| Item | Detail |
-|------|--------|
-| **Insight** | Attention **funnels** across layers: lower layers = broad/scattered attention; higher layers = sparse “massive activation” / sinks |
-| **Method** | **Different KV budget per layer** (more lower, less higher), arithmetic pyramid; within layer, SnapKV-style score from instruction/local window + pooling |
-| **Claimed wins** | ~12% KV ≈ full quality on LongBench; extreme budgets (e.g. 0.7%) large gains vs uniform methods; NIAH strong (even 128 slots on Llama-3-70B in paper setting) |
-| **Limitation** | Layer shape is hand-designed (β hyperparam); still mostly **uniform across heads within a layer** in base PyramidKV |
-| **Code** | https://github.com/Zefan-Cai/PyramidKV |
+\[
+\text{compress}_\varepsilon(L) = \frac{R(\mathrm{Full},L)}{R(M,L)}
+\quad\text{s.t.}\quad
+\mathrm{Q}(M,L) \ge (1-\varepsilon)\,\mathrm{Q}(\mathrm{Full},L).
+\]
 
-**Takeaway for us:** Layer-wise budgets are necessary; uniform depth is wrong.
+**We only celebrate methods that raise \(L_\varepsilon\) a lot or raise \(\mathrm{compress}_\varepsilon\) a lot.**  
+Beating “recent window” by a little at fixed 4k is **not** success.
 
----
+### Suite \(\mathcal{S}\) (v0 → v1)
 
-### 3.3 Ada-KV — *Optimizing KV Cache Eviction by Adaptive Budget Allocation*  
-**arXiv:** [2407.11550](https://arxiv.org/abs/2407.11550)
+| Tier | Task | ε target |
+|------|------|----------|
+| v0 | Single needle, depths {0, 0.5, 1.0} | **0** (exact codes) |
+| v0 | Mid-depth single needle under compression | **0** |
+| v1 | **Multi-needle** (2–3 secrets, ask one or all) | **0** |
+| v1 | **Oracle / anti-oracle** retention (below) | mechanism test |
+| later | Multi-hop over long filler; agent-ish state | ε small |
 
-| Item | Detail |
-|------|--------|
-| **Insight** | Heads differ: sparse vs dispersed; **uniform head budgets waste memory** |
-| **Theory** | L1 upper bound on pre/post-eviction attention output; Top-k minimizes bound for fixed per-head budgets; **global Top-B across heads** then count frequency → optimal head budgets under that bound |
-| **Method** | Plug-and-play on SnapKV / Pyramid → Ada-SnapKV, Ada-Pyramid; safeguard α so sparse heads don’t get zero; GQA-compatible grouping; variable-length FlashAttention storage |
-| **Evals** | RULER + LongBench; **question-aware vs question-agnostic** (critical — agnostic is harder and more realistic) |
-| **Claimed wins** | Consistent quality gains especially low budget & question-agnostic |
-| **Code** | https://github.com/FFY0/AdaKV |
-
-**CRITICAL:** Ada-KV already owns **“adaptive token budget per head.”**  
-Our earlier “HeadBudget” name **must not claim that as novel.** We **cite Ada-KV** and either:
-
-1. use it as a strong baseline, or  
-2. extend it (bytes, bits, decode dynamics, consumer metrics).
+Workstation: interactive full-KV jobs prefer **\(L \le 4\mathrm{k}\)** unless chunked prefill / `--allow-long`.
 
 ---
 
-### 3.4 KIVI — *Tuning-Free Asymmetric 2-bit Quantization for KV Cache*  
-**arXiv:** [2402.02750](https://arxiv.org/abs/2402.02750) · ICML 2024
+## 3. One hypothesis (H1)
 
-| Item | Detail |
-|------|--------|
-| **Insight** | K has **channel-wise outliers** → quantize **K per-channel**; V is a sparse mixer → quantize **V per-token** |
-| **Method** | 2-bit KIVI with residual full-precision window (streaming groups); fused dequant matmul |
-| **Claimed wins** | ~2.6× peak mem; up to ~4× batch; 2.3–3.5× throughput; little quality loss vs FP16 on gen tasks |
-| **Limitation** | Quantization only (no eviction); residual window needed for hard tasks (GSM8K); evals older models mostly |
+### H1 — Critical-span retention is necessary; bare spans are not sufficient
 
-**Takeaway:** Bits and axes of quantization matter as much as *which tokens*. Orthogonal to eviction → **combine**.
+**Statement (revised after kill experiment 2026-07-13):**
 
----
+> For single-fact retrieval in long prompts (needle class), under training-free position compression:  
+> **(Necessity)** If the cache drops the tokens encoding the fact, recovery fails (ε = 0).  
+> **(Sufficiency — revised)** Retaining only the minimal fact tokens + sinks + recent window is **not** enough: the model often corrupts the fact (e.g. `maple-quartz-19` → `…-199`).  
+> **(Sufficiency — H1′)** Retaining **critical tokens ± local context radius R** (plus sinks + recent/question window) restores full-KV success on this suite, at ~**25× smaller** KV than full (~20–30 MB vs ~570 MB at 4k).
 
-### 3.5 RocketKV — *Two-Stage KV Cache Compression*  
-**arXiv:** [2502.14051](https://arxiv.org/abs/2502.14051) · ICML 2025
+**Smoke result:** `results/h1_oracle_20260713T214610Z.json` → verdict **`H1_NEEDS_LOCAL_CONTEXT`**.
 
-| Item | Detail |
-|------|--------|
-| **Insight** | Permanent eviction alone or dynamic sparse alone both miss oracle Top-k under low budgets; **unique** top-k tokens over a full decode are far fewer than sequence length |
-| **Method** | Stage 1: coarse **SnapKV** permanent keep; Stage 2: **Hybrid Sparse Attention** (page min/max + head-dim sparsity à la Quest+SparQ); adaptive split of compression ratio across stages; **RocketKV-MT** keeps full storage for multi-turn but sparse decode |
-| **Claimed wins** | Up to **400×** compression, **3.7×** e2e decode speedup on A100, ~32% peak mem save; strong LongBench/NIAH/RULER |
-| **Models in paper** | Llama-3.1-8B-Ins, Mistral-7B-Ins-v0.2, LongChat-7B |
-| **Code** | https://github.com/NVlabs/RocketKV |
+**Why this could matter at frontier scale:**  
+If true, cheap long context is **not** “store a bit less of everything”; it is **guarantee critical spans + question/recent + sinks**, and spend remaining bytes optimally. That drives detectors, controllers, and training objectives — not another generic top-k.
 
-**Takeaway:** Two-stage is SOTA-shaped for **decode speed**. We should **baseline RocketKV** if runnable. Note: expects even **more** relative gain on non-HBM consumer GPUs.
+**What H1 is *not*:**  
+A claim that SnapKV is new, or that int8 is new. Those are tools for testing H1.
 
----
+### Implications if H1 is true
 
-### 3.6 Related landscape (read/skim level)
+1. Metrics should track **critical-span recall** in the cache, not only output accuracy.  
+2. Methods should be judged by **bytes per retained critical bit**, not tokens alone.  
+3. Multi-hop / agent state will need a **stronger** hypothesis later (structure, not just spans).
 
-| Work | Role |
-|------|------|
-| **StreamingLLM** | Sinks + recent window; infinite stream, not full memory |
-| **H2O** | Heavy-hitters + recent during *generation*; weak on long *prompts* |
-| **Quest / SparQ / Loki** | Dynamic sparse (keep storage, save bandwidth) |
-| **DuoAttention / RazorAttention** | Retrieval heads vs streaming heads |
-| **ChunkKV** | Evict/compress by **semantic chunks**, not isolated tokens (NVIDIA kvpress) |
-| **KVzip** | Query-agnostic importance for multi-query reuse |
-| **MiniKV** | Eviction + 2-bit hybrid |
-| **MInference** | Prefill sparse patterns (TTFT) |
-| **MLA (DeepSeek)** | Architectural KV compression (model design, not plug-in) |
+### Implications if H1 is false
 
-**Tooling:** NVIDIA [kvpress](https://github.com/NVIDIA/kvpress) aggregates several compressors.
+- **Necessity fails:** model recovers fact without span in cache → leakage via other tokens / weights / prompt artifacts; suite is invalid.  
+- **Sufficiency fails:** spans retained but answer wrong → RoPE/layout/precision/decode bugs or need for more than spans (context around fact, precision on keys, etc.). That failure is also a discovery if characterized.
 
 ---
 
-## 4. Gap analysis → what is still inventable
+## 4. Kill experiment (falsification protocol)
 
-| Idea | Already done? | Still open? |
-|------|---------------|-------------|
-| Evict by obs-window attention | SnapKV | incremental only |
-| Layer pyramid budgets | PyramidKV | refine schedule / learn schedule |
-| **Head-wise token budgets** | **Ada-KV** | don’t re-claim |
-| Two-stage permanent + dynamic sparse | RocketKV | hard to beat alone |
-| Asymmetric K/V quant | KIVI | combine with eviction |
-| Question-agnostic eval | Ada-KV, kvpress | we must include |
-| Multi-turn permanent eviction pain | RocketKV-MT, SCBench | product-relevant |
-| **Fixed byte budget (slots × bits)** | weakly explored | **YES — our wedge** |
-| **Decode tok/s as primary metric on consumer GPU** | RocketKV on A100/H100; sparse on 3090 under-reported | **YES** |
-| **Per-head / per-layer precision tiers** | rare | **YES** |
-| Joint optimize **quality × tok/s / VRAM** Pareto on 3090 | not standard | **YES** |
+**Script:** `experiments/bench_h1_oracle.py`  
 
-### Refined invention (post-Ada-KV)
+**Fixed:** model = primary 4B, \(L \approx 4\mathrm{k}\), mid-depth fact(s), same decode policy as other benches, no all-ones mask footgun.
 
-**ByteBudgetKV**
+| Arm | Cache contents | Predict if H1 true |
+|-----|----------------|--------------------|
+| **Full** | All tokens | Success (gold) |
+| **Oracle-keep** | sinks + **critical span(s)** + recent/question window only | **Success ≈ Full** |
+| **Anti-oracle** | same *budget* as oracle, but **exclude** critical span; fill with high-attention or random other tokens | **Failure** (cannot get fact) |
+| **Recent-only** | last \(W\) tokens only (control) | Fail unless fact is at end |
+| **SnapKV / ByteBudget** | our methods | Should succeed only if they retain critical spans |
 
-1. Total resource constraint is **bytes**, not tokens:  
-   `sum_h (num_tokens_h × bytes_per_token_h) ≤ B_bytes`
-2. Heads that are **sparse** get: few tokens, **higher precision** (q8/fp16 residual).  
-   Heads that are **dispersed** get: more tokens, **lower precision** (q4/q2).
-3. Layers get pyramid-style **byte** budgets (extend PyramidKV from slots → bytes).
-4. Optional stage-2: RocketKV-style dynamic top-k inside the retained set for decode traffic.
-5. Controller target for local product: **maximize quality s.t. peak VRAM ≤ 22 GB and decode tok/s ≥ τ** at context L.
+**Kill rules:**
 
-**Why this can still be novel:**
-- Ada-KV optimizes **token counts** under L1 attention-output bound.  
-- KIVI optimizes **bit layouts** uniformly (same scheme all heads).  
-- We optimize **heterogeneous (tokens, bits) under a byte budget** with **3090 bandwidth metrics**.
+1. **Kill sufficiency:** Oracle-keep success rate ≪ Full on ≥ N trials (different fillers/depths) → H1 sufficiency false.  
+2. **Kill necessity:** Anti-oracle success rate ≈ Full → H1 necessity false (or task broken).  
+3. **Support H1:** Oracle ≈ Full **and** Anti-oracle ≈ 0 **and** method success correlates with measured span-in-cache.
 
-**Falsifiable claim:** At equal peak KV **bytes**, ByteBudgetKV > Ada-SnapKV (uniform bits) and > KIVI-only (no eviction) on RULER/LongBench **and** higher decode tok/s at 32k–128k.
+**Minimum N:** 3 depths × ≥1 prompt seed for smoke; then ≥5 seeds for a real claim.
+
+**Logged every run:** span token indices, whether each arm retained them, exact match on secrets, cache token count, KV bytes.
 
 ---
 
-## 5. Evaluation plan (hire-grade)
+## 5. What we do *after* H1 (only one branch)
 
-### Metrics (always report all four)
+| Result | Next |
+|--------|------|
+| H1 supported | H2: at **fixed bytes**, precision on **keys** of critical spans vs more irrelevant tokens — equal-byte Pareto aimed at raising \(L_\varepsilon\) |
+| Sufficiency fails | Diagnose RoPE/precision/layout; H1' about **representation fidelity**, not just positions |
+| Necessity fails | Rebuild suite until gold requires the span |
+| H1 only works for single needle | H3: multi-hop needs **relational** retention (edges, not entities) |
 
-1. **Peak VRAM** (weights + KV + activations)  
-2. **TTFT** (prefill) at L ∈ {4k, 16k, 32k, 64k, 128k}  
-3. **Decode tok/s** at filled context L (this is the “doesn’t slow down” metric)  
-4. **Quality:** LongBench avg + RULER + Needle-in-a-Haystack  
-
-**Must include question-agnostic compression** (compress without seeing the question) — Ada-KV shows this is where methods die.
-
-### Baselines (implement or wrap)
-
-| Baseline | Notes |
-|----------|--------|
-| Full KV (fp16/bf16 or engine default) | Upper bound quality, lower bound length |
-| KV quant only (q8 / q4 / KIVI-style if available) | llama.cpp `--cache-type-k/v` |
-| StreamingLLM | Floor for “dumb” eviction |
-| SnapKV | Permanent eviction SOTA class |
-| PyramidKV | Layer budgets |
-| Ada-SnapKV | Head token budgets — **mandatory** |
-| RocketKV (if runnable) | Two-stage SOTA speed |
-
-### Models (phased — do not parallelize)
-
-| Phase | Model | Goal |
-|-------|--------|------|
-| **1 — invent** | **Qwen3.5-4B** only | Prove ByteBudgetKV theory + ablations |
-| **2 — stress** | One of: Qwen3.6-27B Q4 **or** Gemma 4 26B-A4B | Real VRAM pressure (optional until phase 1 wins) |
-| **3 — transfer** | Optional second family | Paper appendix only |
-
-### Success criteria (v1 invention)
-
-- [ ] At **same KV bytes**, quality ≥ Ada-SnapKV average on LongBench (±1 pt) **or** clearly better on RULER hard needles  
-- [ ] At **same quality**, **≥1.5×** decode tok/s at 32k+ vs full KV (or vs Ada-SnapKV if full doesn’t fit)  
-- [ ] On 3090: demonstrate **context length unlock** (e.g. 64k–128k usable where full KV OOMs or crawls)  
-- [ ] Ablations: bytes vs tokens; hetero precision vs uniform q4; pyramid-bytes vs flat-bytes  
-- [ ] Negative results documented  
+Do **not** add new methods until the kill experiment is green or H1 is revised.
 
 ---
 
-## 6. 30-day execution plan
+## 6. Lab constraints (non-negotiable)
 
-### Week 1 — Lab + tax curves (**Qwen3.5-4B only**)
-- Env: CUDA, PyTorch, HF, FlashAttention if available  
-- One model loaded; script: VRAM / TTFT / tok/s vs context  
-- **Figure 1:** long-context tax on 3090 (small model → long L possible)
-
-### Week 2 — Baselines on **same one model**
-- Full KV, SnapKV, PyramidKV, Ada-style head budgets, KV quant  
-- LongBench subset + NIAH (quality must be measurable on 4B — if not, bump to 9B only)  
-- **Figure 2:** quality vs byte budget  
-
-### Week 3 — Invention on **same one model**
-- ByteBudgetKV: head → (n_tokens, n_bits) under fixed B_bytes  
-- Ablations vs Ada-SnapKV at equal bytes  
-
-### Week 4 — Harden  
-- Question-agnostic; writeup  
-- **Only if phase 1 wins:** optional one mid-size model run
+| | |
+|--|--|
+| Primary model | `Qwen/Qwen3-4B-Instruct-2507` (full attention) |
+| One model until H1 settled | No multi-model zoo |
+| Interactive length | Prefer \(L \le 4096\) full KV |
+| Gold baseline | Full KV always reported |
+| No success theater | Report anti-oracle and failures |
 
 ---
 
-## 7. Risks
+## 7. Related work (one paragraph)
 
-| Risk | Mitigation |
-|------|------------|
-| Invention collapses into Ada-KV + KIVI “and” | Need **joint byte objective** + ablations showing neither alone matches |
-| Variable bits slow kernels on 3090 | Start fake-quant (accuracy) then real kernels; llama.cpp path for product demo |
-| Qwen3.5/3.6 attention hooks differ | Budget engineering time for GQA / MoE gather-scatter |
-| 32 GB RAM limits offload experiments | Focus GPU-resident compression first |
-| Novelty bar rising fast (RocketKV, ChunkKV, …) | Own **consumer byte-budget Pareto** narrative + recent models |
+Training-free KV eviction (StreamingLLM, H2O, SnapKV, PyramidKV, Ada-KV, RocketKV, …) and KV quantization (KIVI, FP8/INT cache, …) already make context cheaper. **None of that is our discovery claim.** We use them as baselines and tools. Our claim is about **what must be retained for near-lossless retrieval under a budget** (H1), then **how to spend remaining bytes** (later H2) to raise \(L_\varepsilon\).
 
 ---
 
-## 8. Repo layout (this folder)
+## 8. Career note (honest)
 
-```
-researchcontext/
-  RESEARCH_BRIEF.md          ← this file
-  papers/NOTES.md            ← short paper cards (expand over time)
-  experiments/               ← scripts, configs (to create)
-  results/                   ← csv + plots (to create)
+Making long context cheaper is a **real** lab problem. Strong public or private evidence of a **new mechanism + falsifiable results** can help get interviews. It does **not** “definitely” produce an OpenAI offer. Optimize for **truth and clarity**, not for fantasy guarantees.
+
+---
+
+## 9. Immediate next action
+
+```powershell
+python experiments\bench_h1_oracle.py --ctx 4096 --depths 0.0,0.5,1.0
 ```
 
----
-
-## 9. Bottom line
-
-- **Yes, invent something** — but not “HeadBudget” as pure token-per-head (Ada-KV, 2024).  
-- **Yes, use recent families** — but **one small model first** (Qwen3.5-4B), not a zoo of 27B models.  
-- **Yes, literature is read** — SnapKV, PyramidKV, Ada-KV, KIVI, RocketKV.  
-- **Wedge:** **byte-heterogeneous KV** under fixed VRAM/bandwidth.
-
-Next: scaffold bench on **Qwen3.5-4B only**.
+Pass/fail H1 on the printed summary; update `results/FINDINGS.md` with the kill outcome before any new method work.

@@ -2,11 +2,46 @@
 
 **Machine:** RTX 3090 24 GB (WDDM — avoid 8k+ full KV)  
 **Model:** `Qwen/Qwen3-4B-Instruct-2507`  
-**Policy:** ctx ≤ 4096
+**Policy:** ctx ≤ 4096 for interactive full-KV jobs  
+
+**Project goal:** maximize \(L\) at ε≈0 quality under 24 GB (see root README + `RESEARCH_BRIEF.md`).
 
 ---
 
-## Headline result (`equal_byte_20260713T212102Z.csv`)
+## H1 kill experiment (`h1_oracle_20260713T214610Z`)
+
+| Arm | Success | Meaning |
+|-----|---------|---------|
+| full | 100% | Gold |
+| **oracle** (minimal fact tokens only) | **33%** | Often `…-199` typo — **bare span ≠ enough** |
+| **oracle_ctx** (fact ±16 tokens) | **100%** | Local context restores full quality |
+| anti_oracle (no fact tokens) | **0%** | Necessity holds |
+| recent | 33% | Only when fact is at end |
+
+**VERDICT: `H1_NEEDS_LOCAL_CONTEXT`**
+
+Science takeaway: near-lossless single-fact retrieval under compression requires **critical tokens + a local neighborhood**, not global filler and not fact tokens alone. Oracle_ctx used ~150–200 cache tokens (~22–29 MB) vs full ~570 MB at 4k.
+
+---
+
+## Dense ceiling map (`ceiling_20260713T213158Z.csv`)
+
+Full KV, mid-depth needle, no eviction:
+
+| L (target) | actual | prefill | decode tok/s | peak VRAM | KV | needle |
+|------------|--------|---------|--------------|-----------|-----|--------|
+| 2048 | 1988 | 2.0 s | 14.2 | 9.3 GB | 280 MB | ok |
+| 3072 | 3028 | 3.8 s | 13.6 | 10.9 GB | 426 MB | ok |
+| 4096 | 4042 | 6.7 s | 11.5 | 13.2 GB | 568 MB | ok |
+
+**Linear VRAM fit** (peak ≈ 5357 + 1.91 MB/token) → at **22 GB** usable:  
+**\(L_{\max}\) est. ≈ 8.7k tokens** full bf16 KV (not yet measured; 8k may thrash WDDM).
+
+Interpretation: weights + activations dominate base; KV grows ~1.9 MB/tok. Quality at 4k full KV is fine on single mid-needle. **Next for goal:** near-lossless KV quant / chunked prefill to approach ~8k+ without thrash, then hierarchy for beyond.
+
+---
+
+## Headline selection result (`equal_byte_20260713T212102Z.csv`)
 
 Needle @ depths 0 / 0.5 / 1.0 × budgets 512 / 768 / 1024 / 1536:
 

@@ -1,52 +1,135 @@
-# ByteBudgetKV — cheap long context (lab)
+# nearlossless-context
 
-**Hardware:** RTX 3090 24 GB + 32 GB RAM  
-**Phase 1 model:** `Qwen/Qwen3-4B-Instruct-2507` only (pure full-attention GQA)  
-**Note:** `Qwen3.5-4B` is hybrid linear+full attention — awkward for classic KV eviction; use later if we extend the method.  
-**Goal:** Prove that under a fixed **byte** KV budget, hetero (tokens × precision) per head/layer beats uniform baselines — quality + flatter decode as context grows.
+**Raise usable local LLM context under fixed VRAM with near–full-KV quality (ε → 0).**
 
-See `RESEARCH_BRIEF.md` for literature and invention claim.
+Private research lab. Not a product. Not “slightly better SnapKV.”
+
+---
+
+## Goal
+
+Run a small open model (starting with **4B**) with **much more context** than naive inference allows, on **consumer hardware**, with **little or no quality loss** vs full key–value (KV) cache.
+
+Formally (see `RESEARCH_BRIEF.md`):
+
+> Maximize \(L_\varepsilon\) s.t. quality ≥ \((1-\varepsilon)\times\) full-KV on suite \(\mathcal{S}\), under **≤24 GB** and usable speed.  
+> Secondary: maximize compression ratio at fixed \(L\) with the same ε constraint.
+
+- **ε → 0** on retrieval-critical tasks (exact facts).  
+- **Theory + falsification first** — not “stack known KV tricks.”  
+- Career: strong evidence on a real lab problem helps; it does **not** guarantee any offer.
+
+### What this is not
+
+- Rebranding known eviction tricks for a paper delta  
+- Infinite context with perfect dense attention on one 3090 (not realistic as pure dense KV)  
+- Multi-model zoo before the 4B ceiling is understood  
+
+### Paths we care about (in order)
+
+1. **Dense ceiling** — how far full / near-lossless KV (e.g. quant) goes before OOM or thrash  
+2. **Near-lossless compression** — only if it preserves the suite at long \(L\)  
+3. **Memory hierarchy** — hot full KV + warm/cold store, only after dense is exhausted  
+
+---
+
+## Hardware & model
+
+| | |
+|--|--|
+| GPU | NVIDIA RTX 3090 **24 GB** (Windows WDDM) |
+| System RAM | 32 GB |
+| Primary model | [`Qwen/Qwen3-4B-Instruct-2507`](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) — dense full-attention GQA |
+| Avoid (for classic KV work) | `Qwen3.5-4B` hybrid linear+full — different game |
+
+**Workstation policy:** prefer **≤4k** for interactive runs. Longer lengths need chunked prefill / careful jobs so the desktop does not freeze. Use `--allow-long` only when you mean it.
+
+---
 
 ## Setup
 
 ```powershell
-cd "X:\Upscaler\Egna\0. Random games\researchcontext"
+cd path\to\nearlossless-context   # or this folder
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -U pip
 pip install -r requirements.txt
-# Install a CUDA build of torch matching your driver if pip's default is wrong:
-# https://pytorch.org/get-started/locally/
+# CUDA torch: https://pytorch.org/get-started/locally/ if the default wheel is CPU-only
 ```
 
-## Phase 1 — measure the long-context tax
+---
+
+## Experiments
+
+| Script | Purpose |
+|--------|---------|
+| `experiments/bench_h1_oracle.py` | **H1 kill experiment** (oracle / anti-oracle spans) |
+| `experiments/bench_ceiling.py` | Dense full-KV ceiling: VRAM / speed / needle vs \(L\) |
+| `experiments/bench_context_tax.py` | Decode/VRAM tax vs length |
+| `experiments/bench_compare.py` | Full vs recent vs SnapKV-style (≤4k) |
+| `experiments/bench_needle.py` | Needle-in-a-haystack smoke |
+| `experiments/bench_equal_byte.py` | Quality vs KV budget |
+| `experiments/bytebudget.py` | Tooling for later H2 (bytes) — not the discovery claim |
+
+### H1 kill experiment (do this before new methods)
 
 ```powershell
-python experiments\bench_context_tax.py
-# shorter smoke:
-python experiments\bench_context_tax.py --ctx 2048,4096,8192
+python experiments\bench_h1_oracle.py --ctx 4096 --depths 0.0,0.5,1.0
 ```
 
-## Phase 1b — full KV vs SnapKV vs recent-window
-
-**Stay ≤4k context** on this workstation (8k+ full KV thrash / lag under WDDM).
+### Ceiling map
 
 ```powershell
-python experiments\bench_compare.py --ctx 2048,4096 --budget 1024
+python experiments\bench_ceiling.py
+# optional longer lengths (can lag the machine):
+python experiments\bench_ceiling.py --lengths 2048,4096,6144 --allow-long
 ```
 
-Outputs land in `results/*.csv` (+ `.json` meta).
-
-## Needle quality smoke (≤4k)
+### Other (≤4k)
 
 ```powershell
-python experiments\bench_needle.py --ctx 4096 --depths 0.0,0.5,1.0 --budget 1024 --window 128
+python experiments\bench_context_tax.py --ctx 2048,4096
+python experiments\bench_needle.py --ctx 4096 --depths 0.0,0.5,1.0
+python experiments\bench_equal_byte.py --ctx 4096 --budgets 512,1024,1536
 ```
 
-## Equal-budget Pareto
+Outputs: `results/*.csv` + `*.json` (gitignored). Narrative: `results/FINDINGS.md`.
 
-```powershell
-python experiments\bench_equal_byte.py --ctx 4096 --depths 0.0,0.5,1.0 --budgets 512,1024,1536
+---
+
+## Status (lab so far)
+
+- Runnable HF lab on 3090; DynamicCache + RoPE/mask footguns documented and fixed for compression paths  
+- Measured **context tax** (longer → slower decode / more VRAM)  
+- Implemented **full / recent / SnapKV-style / ByteBudget** prototypes  
+- Needle suite @4k: SnapKV and ByteBudget can match full on single-needle after fixes; recent only works at end  
+- ByteBudget shows **~2× logical KV bytes** vs bf16 at equal slots (still dequants for HF decode)  
+
+**Next (goal-aligned):** dense **ceiling map** — max \(L\) at ε≈0 for full KV (then near-lossless quant), not more eviction tweaks.
+
+---
+
+## Docs
+
+| File | Content |
+|------|---------|
+| `RESEARCH_BRIEF.md` | Literature notes, early invention framing |
+| `papers/NOTES.md` | Paper cards (SnapKV, PyramidKV, Ada-KV, KIVI, RocketKV, …) |
+| `results/FINDINGS.md` | Experimental findings |
+
+Related work is **crowded** (eviction + KV quant). We treat known methods as **baselines/tools**. Success is **raising \(L\) at ε≈0**, not renaming SnapKV.
+
+---
+
+## Repo
+
+Private: [nearlossless-context](https://github.com/nilsperssonsuorra/nearlossless-context)
+
+```text
+nearlossless-context/
+  experiments/     # benches + methods
+  papers/          # notes
+  results/         # local CSVs + FINDINGS.md
+  RESEARCH_BRIEF.md
+  requirements.txt
 ```
-
-Latest: SnapKV **9/9** needles; ByteBudget **7/9** but much smaller cache @1024. See `results/FINDINGS.md`.

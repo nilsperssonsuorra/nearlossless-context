@@ -106,9 +106,15 @@ def build_needle_prompt(tokenizer, target_tokens: int, depth: float) -> str:
 
 
 def score_answer(text: str) -> dict:
-    text_u = text.upper()
-    hits = {k: (k.upper() in text_u or k in text) for k in NEEDLE_KEYS}
-    # partial credit
+    """Exact token-ish match; avoid 'maple-quartz-19' hitting inside '-199'."""
+    import re
+
+    def has_key(k: str) -> bool:
+        # allow flexible separators but require key not as prefix of longer alnum id
+        pat = re.escape(k).replace(r"\-", r"[-_]?")
+        return re.search(rf"(?<![A-Za-z0-9]){pat}(?![A-Za-z0-9])", text, re.I) is not None
+
+    hits = {k: has_key(k) for k in NEEDLE_KEYS}
     n = sum(1 for v in hits.values() if v)
     return {
         "hit_code": hits[NEEDLE_KEYS[0]],
