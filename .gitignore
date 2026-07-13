@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+results/*.csv
+results/*.json
+!results/.gitkeep
+*.pt
+*.bin
+*.safetensors
+.cache/
+huggingface/
