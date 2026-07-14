@@ -67,6 +67,46 @@ Science takeaway: under a byte budget, **which** tokens you keep (critical local
 
 ---
 
+## Non-oracle scorer budget
+
+**Question:** Without an oracle, can attention scoring recover critical±R\* at near-oracle budgets?
+
+L≈4k, window=128, R\*=1, depths {0, 0.5, 1.0}. Min budget with **100% success on all depths**:
+
+| Method | Min budget (ε=0) | vs oracle | Source |
+|--------|------------------|-----------|--------|
+| **oracle_r1** | **~155** | 1.00× | upper bound |
+| **seed_valley** | **176** | **1.14×** | `scorer_budget_20260714T220943Z` |
+| snapkv | 192 | 1.24× | same + earlier |
+| seed_r1 (atomic ±R\*) | 208 | 1.34× | `…T220217Z` |
+| snap_union_r1 | 208 | 1.34× | `…T220943Z` |
+| shared_r\* (expand→recap) | 256 | 1.65× | `…T215259Z` |
+| recent | none ≤512 | — | only depth=1 |
+
+### What worked: valley completion (`seed_valley`)
+
+1. Aggregate obs-window attention → shared prefix score (last layers, max over heads).  
+2. Greedy high-score **seeds**.  
+3. For each seed, keep the **contiguous high-score segment** (grow while score ≥ 0.25× seed) **plus** fixed ±R\*.  
+4. Force sinks + recent; never break a segment to free slots for lower seeds.
+
+Beats SnapKV by **16 tokens** (~29→27 MB). Scorer tax vs oracle: **21 tokens** (was 37 with SnapKV).
+
+### What failed / weaker
+
+- **expand→recap by token score** drops low-score neighbors of peaks (digits) → shared_r\* stuck at 256.  
+- **Fixed ±R\* only** (`seed_r1`) helps mid-depth but not enough at depth=0.  
+- **SnapKV per-layer union + ±R\*** does not beat vanilla SnapKV (union loses per-head diversity at decode? or over-complete wastes budget).
+
+At tight budgets, **span recall predicts success**: recall≲0.8 → corrupted codes (`maple-qu-qu-19`, missing `7742`); recall≳0.87 → usually pass.
+
+**VERDICT: `SCORER_NEAR_ORACLE`** (best non-oracle **seed_valley@176**)
+
+- ~**21×** smaller KV than full (~27 MB vs ~570 MB).  
+- Remaining tax **176→155** is pure **detection** (missing mass on some entity tokens), not “need more filler.”
+
+---
+
 ## Dense ceiling map (`ceiling_20260713T213158Z.csv`)
 
 Full KV, mid-depth needle, no eviction:
@@ -140,16 +180,16 @@ Previous Ada path padded per-head lists to `max_k`, so effective length was ~200
 
 **Mechanistic (H1+H2):** Near-lossless single-fact retrieval under KV budget requires **critical spans ± R\*=1**; at fixed bytes, **priority retention** beats equal/2× volume of non-critical tokens. Int8 on the priority set still hits ε=0 on this suite.
 
-**Systems (tooling):** **ByteBudgetKV** matches SnapKV needle quality on 4k / 3 depths while cutting **logical** KV size ~2× at equal token budget (int8), or holding ~2× tokens at equal logical bytes — useful once scorer keeps the right spans.
+**Systems:** Non-oracle **seed_valley** reaches ε=0 at **176** tokens (~27 MB) vs oracle **155** and full **~570 MB** (~21× compress, **1.14×** scorer tax). Beats SnapKV@192. **ByteBudgetKV** still available for ~2× logical packing once spans are retained.
 
-Not yet: custom int8 attention kernels, multi-hop / multi-needle, multi-model transfer, measured \(L_\varepsilon\) lift beyond 4k without thrashing this desktop.
+Not yet: detector that matches oracle@155, multi-hop / multi-needle, multi-model transfer, measured \(L_\varepsilon\) lift beyond 4k without thrashing this desktop.
 
 ---
 
 ## Next (optional)
 
-1. **Raise \(L_\varepsilon\)** under fixed VRAM: scorer that recovers critical±R\* without oracle + measured L at ε≈0 vs full  
-2. Multi-needle / multi-hop kill (H3) — does “entity neighborhood” still suffice?  
-3. int8-packed decode path (real bandwidth win)  
-4. Chunked prefill so peak VRAM drops too  
+1. **Close remaining tax** (176 → 155): better peak detection / multi-seed coverage  
+2. **Raise measured \(L_\varepsilon\)** under fixed VRAM (chunked prefill + seed_valley at L>4k)  
+3. Multi-needle / multi-hop kill (H3) — does valley neighborhood still suffice?  
+4. int8-packed decode path (real bandwidth win)  
 5. Second model only after more 4B science  

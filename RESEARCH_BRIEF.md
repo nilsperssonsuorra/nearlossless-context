@@ -131,7 +131,7 @@ A claim that SnapKV is new, or that int8 is new. Those are tools for testing H1.
 | Necessity fails | Rebuild suite until gold requires the span |
 | H1 only works for single needle | H3: multi-hop needs **relational** retention (edges, not entities) |
 
-**Status (2026-07-13):** H1 → `H1_NEEDS_LOCAL_CONTEXT` with \(R^*=1\). H2 → **`H2_SUPPORTED`** (`results/h2_bytes_20260713T224808Z`): priority±R\* matches full; volume that avoids critical fails even at 2× tokens. **Next:** raise measured \(L_\varepsilon\) with a non-oracle scorer, then H3 multi-hop.
+**Status (2026-07-14):** H1 → `H1_NEEDS_LOCAL_CONTEXT` with \(R^*=1\). H2 → **`H2_SUPPORTED`**. Scorer → **`SCORER_NEAR_ORACLE`**: best non-oracle **seed_valley @176** tokens (beats SnapKV@192; oracle@~155). **Next:** close tax 176→155; raise measured \(L_\varepsilon\) at L>4k; H3 multi-hop.
 
 Do **not** add new methods until the kill experiment is green or H1 is revised.
 

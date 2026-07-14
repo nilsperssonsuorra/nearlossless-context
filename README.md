@@ -66,6 +66,7 @@ pip install -r requirements.txt
 | `experiments/bench_h1_oracle.py` | **H1 kill experiment** (oracle / anti-oracle spans) |
 | `experiments/bench_h1_radius.py` | **H1′** minimum local radius \(R\) around critical spans |
 | `experiments/bench_h2_bytes.py` | **H2** equal-byte: priority (crit±R\*) vs volume |
+| `experiments/bench_scorer_budget.py` | Non-oracle scorer vs oracle at tight budgets |
 | `experiments/bench_ceiling.py` | Dense full-KV ceiling: VRAM / speed / needle vs \(L\) |
 | `experiments/bench_context_tax.py` | Decode/VRAM tax vs length |
 | `experiments/bench_compare.py` | Full vs recent vs SnapKV-style (≤4k) |
@@ -79,9 +80,10 @@ pip install -r requirements.txt
 python experiments\bench_h1_oracle.py --ctx 4096 --depths 0.0,0.5,1.0
 python experiments\bench_h1_radius.py --ctx 4096 --radii 0,1,2,4,8,16
 python experiments\bench_h2_bytes.py --ctx 4096 --depths 0.0,0.5,1.0 --R 1
+python experiments\bench_scorer_budget.py --ctx 4096 --budgets 168,192,256,384,512 --R 1
 ```
 
-Latest: **\(R^*=1\)** restores ε=0; **H2_SUPPORTED** — priority±R\* beats equal/2× volume that misses critical spans.
+Latest: **\(R^*=1\)**; **H2_SUPPORTED**; non-oracle **seed_valley ε=0 @176** (beats SnapKV@192; oracle@155).
 
 ### Ceiling map
 
@@ -108,10 +110,10 @@ Outputs: `results/*.csv` + `*.json` (gitignored). Narrative: `results/FINDINGS.m
 - Runnable HF lab on 3090; DynamicCache + RoPE/mask footguns documented and fixed for compression paths  
 - **H1 / H1′:** critical spans need local radius \(R^*=1\); bare fact tokens insufficient  
 - **H2:** at fixed bytes, priority (crit±R\*) beats equal/2× volume without critical spans  
+- **Scorer:** **seed_valley** hits ε=0 @**176** tokens (~21× vs full); SnapKV@192; oracle@**~155**  
 - Full-KV ceiling ~4k measured; \(L_{\max}\) est. ~8.7k at 22 GB (not yet run)  
-- SnapKV / ByteBudget match full on single-needle when they retain the right spans  
 
-**Next (goal-aligned):** non-oracle scorer that recovers critical±R\* → measure raised \(L_\varepsilon\) under fixed VRAM; then multi-hop (H3).
+**Next (goal-aligned):** close tax 176→155; raise measured \(L_\varepsilon\) at L>4k (chunked prefill + seed_valley); multi-hop (H3).
 
 ---
 
