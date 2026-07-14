@@ -67,6 +67,8 @@ pip install -r requirements.txt
 | `experiments/bench_h1_radius.py` | **H1′** minimum local radius \(R\) around critical spans |
 | `experiments/bench_h2_bytes.py` | **H2** equal-byte: priority (crit±R\*) vs volume |
 | `experiments/bench_scorer_budget.py` | Non-oracle scorer vs oracle at tight budgets |
+| `experiments/bench_l_epsilon.py` | **L_ε** vs length (chunked prefill + budgeted KV) |
+| `experiments/scorer_valley.py` | seed_valley selection + compress helpers |
 | `experiments/bench_ceiling.py` | Dense full-KV ceiling: VRAM / speed / needle vs \(L\) |
 | `experiments/bench_context_tax.py` | Decode/VRAM tax vs length |
 | `experiments/bench_compare.py` | Full vs recent vs SnapKV-style (≤4k) |
@@ -81,9 +83,10 @@ python experiments\bench_h1_oracle.py --ctx 4096 --depths 0.0,0.5,1.0
 python experiments\bench_h1_radius.py --ctx 4096 --radii 0,1,2,4,8,16
 python experiments\bench_h2_bytes.py --ctx 4096 --depths 0.0,0.5,1.0 --R 1
 python experiments\bench_scorer_budget.py --ctx 4096 --budgets 168,192,256,384,512 --R 1
+python experiments\bench_l_epsilon.py --lengths 4096,6144,8192 --allow-long --mid-only --budgets 176,256
 ```
 
-Latest: **\(R^*=1\)**; **H2_SUPPORTED**; non-oracle **seed_valley ε=0 @176** (beats SnapKV@192; oracle@155).
+Latest: **\(R^*=1\)**; **H2_SUPPORTED**; **seed_valley@176** matches full mid-needle through **8k** (~42× smaller decode KV).
 
 ### Ceiling map
 
@@ -110,10 +113,11 @@ Outputs: `results/*.csv` + `*.json` (gitignored). Narrative: `results/FINDINGS.m
 - Runnable HF lab on 3090; DynamicCache + RoPE/mask footguns documented and fixed for compression paths  
 - **H1 / H1′:** critical spans need local radius \(R^*=1\); bare fact tokens insufficient  
 - **H2:** at fixed bytes, priority (crit±R\*) beats equal/2× volume without critical spans  
-- **Scorer:** **seed_valley** hits ε=0 @**176** tokens (~21× vs full); SnapKV@192; oracle@**~155**  
-- Full-KV ceiling ~4k measured; \(L_{\max}\) est. ~8.7k at 22 GB (not yet run)  
+- **Scorer:** **seed_valley@176** ε=0; beats SnapKV@192 at 4k; oracle@**~155**  
+- **L_ε (mid):** full and seed_valley@176 both reach **8k**; decode KV **~27 MB vs ~1.1 GB**  
+- Chunked prefill (512) makes long context interactive on WDDM  
 
-**Next (goal-aligned):** close tax 176→155; raise measured \(L_\varepsilon\) at L>4k (chunked prefill + seed_valley); multi-hop (H3).
+**Next (goal-aligned):** streaming compress (cut peak VRAM); 3-depth L_ε; multi-hop (H3).
 
 ---
 

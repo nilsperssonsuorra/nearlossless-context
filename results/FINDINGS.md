@@ -107,6 +107,28 @@ At tight budgets, **span recall predicts success**: recall≲0.8 → corrupted c
 
 ---
 
+## L_ε @ longer context (`l_epsilon_20260714T223432Z`, mid-depth)
+
+**Setup:** chunked prefill (512), mid-depth needle only, lengths {4k, 6k, 8k}, Qwen3-4B, 3090.
+
+| Method | L_ε (mid) | Decode KV @8k | Prefill peak VRAM @8k |
+|--------|-----------|---------------|------------------------|
+| **full** | **8192** | ~1148 MB | ~9.4 GB |
+| **seed_valley@176** | **8192** | **~27 MB** | ~12.8 GB (score clone) |
+| seed_valley@256 | 8192 | ~38 MB | ~12.8 GB |
+| snapkv@256 | 8192 | ~38 MB | ~12.8 GB |
+| snapkv@176 | 4096 | — | fails mid @6k/8k |
+| recent@176/256 | none | — | mid needle fails |
+
+**VERDICT: `L_EPS_MATCHED`** (mid-depth smoke through 8k)
+
+- **compress_ε @8k** (decode KV): full / seed_valley@176 ≈ **1148 / 27 ≈ 42×** at ε=0 mid-needle.  
+- Chunked prefill makes **8k full KV interactive** (~3s prefill, ~9.4 GB peak) — prior single-shot path thrashed WDDM.  
+- seed_valley keeps **ε=0 quality** with oracle-near budget while SnapKV@176 breaks at longer L.  
+- Caveat: prefill still builds full KV before compress (peak VRAM not reduced to 27 MB). Streaming / online eviction is the next systems step to raise *peak-VRAM-limited* L_ε further.
+
+---
+
 ## Dense ceiling map (`ceiling_20260713T213158Z.csv`)
 
 Full KV, mid-depth needle, no eviction:
@@ -180,16 +202,16 @@ Previous Ada path padded per-head lists to `max_k`, so effective length was ~200
 
 **Mechanistic (H1+H2):** Near-lossless single-fact retrieval under KV budget requires **critical spans ± R\*=1**; at fixed bytes, **priority retention** beats equal/2× volume of non-critical tokens. Int8 on the priority set still hits ε=0 on this suite.
 
-**Systems:** Non-oracle **seed_valley** reaches ε=0 at **176** tokens (~27 MB) vs oracle **155** and full **~570 MB** (~21× compress, **1.14×** scorer tax). Beats SnapKV@192. **ByteBudgetKV** still available for ~2× logical packing once spans are retained.
+**Systems:** Non-oracle **seed_valley@176** matches full mid-needle through **8k** with **~27 MB** decode KV (~**42×** vs full @8k). Chunked prefill unlocks interactive 8k on 3090 WDDM. Scorer tax vs oracle remains ~176 vs 155 at 4k.
 
-Not yet: detector that matches oracle@155, multi-hop / multi-needle, multi-model transfer, measured \(L_\varepsilon\) lift beyond 4k without thrashing this desktop.
+Not yet: streaming eviction (cut *peak* VRAM), oracle-matched detector, multi-hop / multi-needle, multi-model, full 3-depth L_ε curve above 4k.
 
 ---
 
 ## Next (optional)
 
-1. **Close remaining tax** (176 → 155): better peak detection / multi-seed coverage  
-2. **Raise measured \(L_\varepsilon\)** under fixed VRAM (chunked prefill + seed_valley at L>4k)  
-3. Multi-needle / multi-hop kill (H3) — does valley neighborhood still suffice?  
-4. int8-packed decode path (real bandwidth win)  
-5. Second model only after more 4B science  
+1. **Streaming / online compress during prefill** — lower peak VRAM, push L beyond 8–12k  
+2. Full 3-depth L_ε confirm at 6k/8k  
+3. Multi-needle / multi-hop kill (H3)  
+4. Close scorer tax 176→155  
+5. int8-packed decode path; second model later

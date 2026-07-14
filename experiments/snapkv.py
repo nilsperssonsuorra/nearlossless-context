@@ -54,6 +54,53 @@ def cache_nbytes(past: Any) -> int:
     return n
 
 
+@torch.inference_mode()
+def prefill_chunked(
+    model,
+    input_ids: torch.Tensor,
+    *,
+    chunk_size: int = 512,
+    attention_mask: torch.Tensor | None = None,
+) -> tuple[Any, torch.Tensor]:
+    """
+    Prefill in fixed-size chunks to cut peak attention activations (WDDM-friendly).
+    Builds full-length DynamicCache; returns (past, last_logits).
+    """
+    seq_len = int(input_ids.shape[-1])
+    device = input_ids.device
+    past = None
+    last_logits = None
+    chunk_size = max(int(chunk_size), 1)
+
+    for start in range(0, seq_len, chunk_size):
+        end = min(start + chunk_size, seq_len)
+        chunk = input_ids[:, start:end]
+        pos = torch.arange(start, end, device=device, dtype=torch.long).unsqueeze(0)
+        am = None
+        if attention_mask is not None:
+            am = attention_mask[:, start:end]
+        kwargs: dict[str, Any] = {
+            "input_ids": chunk,
+            "use_cache": True,
+            "position_ids": pos,
+        }
+        if am is not None:
+            kwargs["attention_mask"] = am
+        if past is not None:
+            kwargs["past_key_values"] = past
+            kwargs["cache_position"] = pos.squeeze(0)
+        try:
+            out = model(**kwargs)
+        except TypeError:
+            kwargs.pop("cache_position", None)
+            out = model(**kwargs)
+        past = out.past_key_values
+        last_logits = out.logits[:, -1, :]
+        del out
+    assert past is not None and last_logits is not None
+    return past, last_logits
+
+
 def compress_recent(past: Any, max_capacity: int) -> Any:
     """Keep only the last max_capacity tokens (local window baseline). Mutates cache."""
     if not is_dynamic_cache(past):
@@ -216,14 +263,22 @@ def prefill_with_snapkv(
         )
         return out.past_key_values, out.logits[:, -1, :]
 
-    # 1) Full prefill (fast path)
-    out_full = model(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        use_cache=True,
-    )
-    past_full = out_full.past_key_values
-    last_logits = out_full.logits[:, -1, :]
+    # 1) Prefill (chunked when long — cuts peak SDPA / WDDM thrash)
+    if seqlen > 2048:
+        past_full, last_logits = prefill_chunked(
+            model,
+            input_ids,
+            chunk_size=512,
+            attention_mask=attention_mask,
+        )
+    else:
+        out_full = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            use_cache=True,
+        )
+        past_full = out_full.past_key_values
+        last_logits = out_full.logits[:, -1, :]
 
     window_size = min(window_size, seqlen - 1)
     prefix_len = seqlen - window_size
