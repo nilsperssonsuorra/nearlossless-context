@@ -131,7 +131,7 @@ A claim that SnapKV is new, or that int8 is new. Those are tools for testing H1.
 | Necessity fails | Rebuild suite until gold requires the span |
 | H1 only works for single needle | H3: multi-hop needs **relational** retention (edges, not entities) |
 
-**Status (2026-07-15):** H1/H2 green; scorer **seed_valley@176**; **L_ε mid matched through 8k** vs full with ~42× smaller decode KV (`l_epsilon_20260714T223432Z`). **Next:** streaming eviction for peak VRAM; 3-depth L_ε; H3 multi-hop.
+**Status (2026-07-15):** H1/H2 green; posthoc@176; **stream@512 \(L_\varepsilon=8\mathrm{k}\)**; **stream@1536 \(L_\varepsilon\ge16\mathrm{k}\)** all depths (~8× peak-cache cut vs full). **Next:** adaptive stream budget; H3 multi-hop.
 
 Do **not** add new methods until the kill experiment is green or H1 is revised.
 

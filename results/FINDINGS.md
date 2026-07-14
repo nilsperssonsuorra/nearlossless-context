@@ -107,6 +107,56 @@ At tight budgets, **span recall predicts success**: recall≲0.8 → corrupted c
 
 ---
 
+## Streaming prefill compress (`streaming_20260714T223948Z` + sweeps)
+
+**Goal:** cut *peak* KV during prefill (not only final decode KV).
+
+| Method | Peak cache | Final cache | Mid@4k/8k | 3 depths@4k/8k |
+|--------|------------|-------------|-----------|----------------|
+| full_chunked | =L (4k–8k) | =L | ok | (full) |
+| posthoc seed_valley@176 | =L | ~192 | ok | ok @4k prior |
+| **stream@512→512** | **~1024** | **512** | **ok** | **ok all** |
+| stream@176→176 | ~688 | ~176 | **fail** | — |
+| stream@\*→176 final tighten | high | 176 | **fail** | — |
+| recent@176 | =L | ~176 | fail mid | — |
+
+**VERDICT: `STREAM_PEAK_WIN` (at budget 512)**
+
+- Online seed_valley after each chunk with **stream_budget=512** keeps ε=0 on **all depths {0, 0.5, 1.0}** at **4k and 8k**.  
+- **Peak cache ~1024** vs full **8150** @8k (~**8×** lower peak tokens).  
+- Peak VRAM ~**8.5 GB** (stable) vs posthoc valley ~**12.8 GB** (score-clone on full past).  
+- Final decode KV ~**72 MB** (512 tok) vs full ~**1148 MB** @8k (~**16×**); looser than posthoc@176 (~27 MB).  
+- **Cannot** currently final-tighten stream→176: intermediate compress uses pre-question queries and already thins spans; posthoc@176 still needs full past + question window.
+
+Science takeaway: for peak-VRAM-limited \(L_\varepsilon\), **online retention at a moderate budget (512)** beats “full then compress to 176.” Query-agnostic mid-stream scoring is the bottleneck for oracle-tight online budgets.
+
+### Long-L streaming ceiling (2026-07-15)
+
+All depths {0, 0.5, 1.0}; peak cache ≈ budget + chunk (512).
+
+| Stream budget | L=8k | L=12k | L=16k | Peak cache | Peak VRAM |
+|---------------|------|-------|-------|------------|-----------|
+| **512** | **3/3** | 2/3 (mid fail `…-qu-qu-19`) | 2/3 mid fail | ~1024 | ~8.5 GB |
+| 768 / 1024 | — | mid fail | mid fail | ~1.3–1.5k | ~8.6–8.8 GB |
+| **1536** | — | **3/3** | **3/3** | **~2048** | **~9.1 GB** |
+| full mid only | ok | ok | ok | =L (8–16k) | 9.4–11.0 GB |
+
+**\(L_\varepsilon\) (ε=0, all depths):**
+
+| Method | \(L_\varepsilon\) | Peak cache @ that L | Decode KV |
+|--------|-------------------|---------------------|-----------|
+| stream@512 | **8192** | ~1024 | ~72 MB |
+| **stream@1536** | **≥16384** (tested) | **~2048** | **~216 MB** |
+| full mid | ≥16384 | ~16k | ~2300 MB |
+
+**VERDICT: `L_EPS_RAISED` under peak-cache constraint**
+
+- Streaming reaches **16k** quality with peak cache **~2k** (~**8×** below full @16k) and VRAM **~9.1 GB** vs full **~11.0 GB**.  
+- Mid-depth is the hard depth as L grows: need **higher stream budget** (512→1536 from 8k→16k), not more recent-only.  
+- Full still fits 16k on 3090 with chunked prefill, but pays **~2.3 GB** decode KV vs **~0.22 GB** stream@1536 (~**10×**).
+
+---
+
 ## L_ε @ longer context (`l_epsilon_20260714T223432Z`, mid-depth)
 
 **Setup:** chunked prefill (512), mid-depth needle only, lengths {4k, 6k, 8k}, Qwen3-4B, 3090.
@@ -202,16 +252,18 @@ Previous Ada path padded per-head lists to `max_k`, so effective length was ~200
 
 **Mechanistic (H1+H2):** Near-lossless single-fact retrieval under KV budget requires **critical spans ± R\*=1**; at fixed bytes, **priority retention** beats equal/2× volume of non-critical tokens. Int8 on the priority set still hits ε=0 on this suite.
 
-**Systems:** Non-oracle **seed_valley@176** matches full mid-needle through **8k** with **~27 MB** decode KV (~**42×** vs full @8k). Chunked prefill unlocks interactive 8k on 3090 WDDM. Scorer tax vs oracle remains ~176 vs 155 at 4k.
+**Systems:**  
+- **Posthoc** seed_valley@176: ~**42×** decode KV @8k mid (full peak).  
+- **Streaming @512:** \(L_\varepsilon=8\mathrm{k}\) all depths; peak cache ~1k.  
+- **Streaming @1536:** \(L_\varepsilon \ge 16\mathrm{k}\) all depths; peak cache ~2k, decode ~216 MB vs full ~2.3 GB.  
 
-Not yet: streaming eviction (cut *peak* VRAM), oracle-matched detector, multi-hop / multi-needle, multi-model, full 3-depth L_ε curve above 4k.
+Not yet: online@176, multi-hop / multi-needle, multi-model, adaptive budget vs L.
 
 ---
 
 ## Next (optional)
 
-1. **Streaming / online compress during prefill** — lower peak VRAM, push L beyond 8–12k  
-2. Full 3-depth L_ε confirm at 6k/8k  
-3. Multi-needle / multi-hop kill (H3)  
-4. Close scorer tax 176→155  
-5. int8-packed decode path; second model later
+1. **Adaptive stream budget** vs L (or better mid-stream scorer) so 16k works near 512–1024  
+2. Multi-needle / multi-hop kill (H3)  
+3. Close posthoc scorer tax 176→155  
+4. int8-packed decode; second model later

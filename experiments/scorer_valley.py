@@ -196,12 +196,18 @@ def compress_with_seed_valley(
     """
     Score obs-window attention on full past, select seed_valley keep set, compress.
     Mutates past. Returns (past, keep_indices).
+    Requires cache_seq_len(past) == input_ids length (full post-hoc path).
     """
     from bench_h1_oracle import compress_keep_indices
+    from snapkv import cache_seq_len
 
     seq_len = int(input_ids.shape[-1])
     if seq_len <= budget:
         return past, list(range(seq_len))
+    if cache_seq_len(past) != seq_len:
+        raise ValueError(
+            "compress_with_seed_valley expects full past; use compress_past_seed_valley"
+        )
 
     attns, window_size, prefix_len = obs_attentions(
         model, input_ids, past, window_size
@@ -232,3 +238,225 @@ def compress_with_seed_valley(
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     return past, keep
+
+
+@torch.inference_mode()
+def obs_attentions_on_past(
+    model,
+    obs_ids: torch.Tensor,
+    past,
+    *,
+    abs_obs_start: int,
+):
+    """
+    Score last-window queries against current cache.
+    past must end with the same tokens as obs_ids (recent always kept).
+    abs_obs_start: absolute RoPE index of obs_ids[0].
+    """
+    from snapkv import cache_seq_len
+
+    window = int(obs_ids.shape[-1])
+    S = cache_seq_len(past)
+    if S <= window:
+        return None, window, 0
+    prefix_len = S - window
+    past_score = crop_cache_prefix(clone_dynamic_cache(past), prefix_len)
+
+    text_cfg = getattr(model.config, "text_config", model.config)
+    old_impl = getattr(text_cfg, "_attn_implementation", None)
+    old_root = getattr(model.config, "_attn_implementation", None)
+    try:
+        if hasattr(text_cfg, "_attn_implementation"):
+            text_cfg._attn_implementation = "eager"
+        if hasattr(model.config, "_attn_implementation"):
+            model.config._attn_implementation = "eager"
+        pos = torch.arange(
+            abs_obs_start,
+            abs_obs_start + window,
+            device=obs_ids.device,
+            dtype=torch.long,
+        ).unsqueeze(0)
+        try:
+            out_obs = model(
+                input_ids=obs_ids,
+                past_key_values=past_score,
+                position_ids=pos,
+                cache_position=pos.squeeze(0),
+                use_cache=True,
+                output_attentions=True,
+            )
+        except TypeError:
+            out_obs = model(
+                input_ids=obs_ids,
+                past_key_values=past_score,
+                position_ids=pos,
+                use_cache=True,
+                output_attentions=True,
+            )
+    finally:
+        if old_impl is not None:
+            text_cfg._attn_implementation = old_impl
+        if old_root is not None:
+            model.config._attn_implementation = old_root
+
+    del past_score
+    return out_obs.attentions, window, prefix_len
+
+
+@torch.inference_mode()
+def compress_past_seed_valley(
+    model,
+    input_ids_so_far: torch.Tensor,
+    past,
+    *,
+    budget: int,
+    window_size: int = 128,
+    sinks: int = 8,
+    expand_radius: int = 1,
+    score_layers: int = 8,
+) -> tuple[Any, list[int]]:
+    """
+    Compress current past (possibly already shorter than prompt) to `budget`.
+    Uses last window of input_ids_so_far as observation queries.
+    """
+    from bench_h1_oracle import compress_keep_indices
+    from snapkv import cache_seq_len
+
+    T = int(input_ids_so_far.shape[-1])
+    S = cache_seq_len(past)
+    if S <= budget:
+        return past, list(range(S))
+
+    window_size = min(window_size, T - 1, S - 1)
+    if window_size < 1:
+        return past, list(range(S))
+
+    obs_ids = input_ids_so_far[:, -window_size:]
+    abs_obs_start = T - window_size
+    attns, window_size, prefix_len = obs_attentions_on_past(
+        model, obs_ids, past, abs_obs_start=abs_obs_start
+    )
+    if attns is None or all(a is None for a in attns):
+        keep = list(range(max(0, S - budget), S))
+        past = compress_keep_indices(past, keep)
+        return past, keep
+
+    h_kv = past.layers[0].keys.shape[1]
+    score = aggregate_prefix_vote(
+        attns,
+        h_kv=h_kv,
+        prefix_len=prefix_len,
+        window_size=window_size,
+        score_layers=score_layers,
+    )
+    # select in *cache* index space (length S)
+    keep = select_seed_valley(
+        score,
+        seq_len=S,
+        prefix_len=prefix_len,
+        budget=budget,
+        sinks=sinks,
+        window_size=window_size,
+        expand_radius=expand_radius,
+    )
+    past = compress_keep_indices(past, keep)
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return past, keep
+
+
+@torch.inference_mode()
+def prefill_streaming_valley(
+    model,
+    input_ids: torch.Tensor,
+    *,
+    stream_budget: int,
+    final_budget: int | None = None,
+    chunk_size: int = 512,
+    window_size: int = 128,
+    sinks: int = 8,
+    expand_radius: int = 1,
+    score_layers: int = 8,
+) -> tuple[Any, torch.Tensor, dict]:
+    """
+    Chunked prefill with online seed_valley compress whenever cache > stream_budget.
+
+    Peak KV stays near stream_budget (+ one chunk), not full L.
+    final_budget: optional tighter compress at end (default = stream_budget).
+
+    Returns (past, last_logits, stats).
+    """
+    from snapkv import cache_nbytes, cache_seq_len
+
+    final_budget = final_budget if final_budget is not None else stream_budget
+    seq_len = int(input_ids.shape[-1])
+    device = input_ids.device
+    past = None
+    last_logits = None
+    chunk_size = max(int(chunk_size), 1)
+    peak_cache = 0
+    n_compress = 0
+
+    for start in range(0, seq_len, chunk_size):
+        end = min(start + chunk_size, seq_len)
+        chunk = input_ids[:, start:end]
+        pos = torch.arange(start, end, device=device, dtype=torch.long).unsqueeze(0)
+        kwargs: dict[str, Any] = {
+            "input_ids": chunk,
+            "use_cache": True,
+            "position_ids": pos,
+        }
+        if past is not None:
+            kwargs["past_key_values"] = past
+            kwargs["cache_position"] = pos.squeeze(0)
+        try:
+            out = model(**kwargs)
+        except TypeError:
+            kwargs.pop("cache_position", None)
+            out = model(**kwargs)
+        past = out.past_key_values
+        last_logits = out.logits[:, -1, :]
+        del out
+
+        peak_cache = max(peak_cache, cache_seq_len(past))
+
+        # Online compress after chunk if over stream budget
+        if cache_seq_len(past) > stream_budget:
+            past, _ = compress_past_seed_valley(
+                model,
+                input_ids[:, :end],
+                past,
+                budget=stream_budget,
+                window_size=window_size,
+                sinks=sinks,
+                expand_radius=expand_radius,
+                score_layers=score_layers,
+            )
+            n_compress += 1
+            peak_cache = max(peak_cache, cache_seq_len(past))
+
+    assert past is not None and last_logits is not None
+
+    # Final tighten if requested
+    if cache_seq_len(past) > final_budget:
+        past, _ = compress_past_seed_valley(
+            model,
+            input_ids,
+            past,
+            budget=final_budget,
+            window_size=window_size,
+            sinks=sinks,
+            expand_radius=expand_radius,
+            score_layers=score_layers,
+        )
+        n_compress += 1
+
+    stats = {
+        "peak_cache_tokens": peak_cache,
+        "final_cache_tokens": cache_seq_len(past),
+        "final_kv_mb": round(cache_nbytes(past) / (1024**2), 3),
+        "n_compress": n_compress,
+        "stream_budget": stream_budget,
+        "final_budget": final_budget,
+    }
+    return past, last_logits, stats
