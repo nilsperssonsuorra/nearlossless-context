@@ -243,30 +243,33 @@ Lab schedule maps (n_entities, L, multi_hop) → (R, budget, stream_budget).
 - Streaming@512 is robust on Llama (even 8k); Qwen2.5 needs more @8k.  
 - Posthoc scorer tax: primary ~176, Llama ~256, Qwen2.5 ~320.
 
-### Hybrid out-of-family: Gemma-4 E4B-it (`transfer_20260715T223926Z` + debug)
+### Hybrid out-of-family: Gemma-4 E4B-it (`transfer_20260715T225225Z` + retune)
 
-Model: `google/gemma-4-E4B-it` — **hybrid** sliding-window (W=512, ~5:1) + full-attention layers; shared-KV tail. Not a pure full-attn target.
+Model: `google/gemma-4-E4B-it` — **hybrid** sliding-window (W=512, ~5:1) + full-attention layers; shared-KV tail.
 
 | Arm @4k mid | Result |
 |-------------|--------|
-| full | **ok** (suite valid) |
+| full | **ok** |
 | oracle_r1 (crit±1 on **full layers only**) | **ok**, recall=1.0, ~175 full-KV tokens |
-| anti_oracle | **fail**, recall=0.0 (H1 necessity) |
-| stream@512 / 768 / 1024 | **fail** (512: partial `BLUE-ORBIT` only) |
-| posthoc seed_valley @176–512 | **fail**, recall=0.0 |
+| anti_oracle | **fail**, recall=0.0 |
+| posthoc seed_valley **@176** | **ok** (after score-pass mask fix; recall≈0.87) |
+| stream@512 R=1 | fail (partial / corrupted codes) |
+| stream@**1024 R=2** | **ok** |
+| stream@1536 R=1 | **ok** |
 
-**Infrastructure fix (required for any hybrid compress):**
-- `compress_keep_indices` / SnapKV compress **skip sliding layers** (already windowed; masks use `cumulative_length`).
-- `clone_dynamic_cache` / `crop_cache_prefix` preserve `DynamicSlidingWindowLayer`.
-- `cache_seq_len` reports **full-layer** length (compressible store).
+**Infrastructure (hybrid-safe KV):**
+- Compress **full layers only**; leave sliding intact (`cumulative_length` / masks).
+- `clone_dynamic_cache` preserves `DynamicSlidingWindowLayer`.
+- `cache_seq_len` = full-layer length.
 
-**Why scorer fails:** eager score-pass attentions on full layers only put mass on indices **0…510** (nnz=511 = sliding window), never mid-context critical (~2000). Sink collapse — seed_valley cannot recover the needle. Oracle still proves H1 on full-layer KV.
+**Score-pass bug (fixed):** HF `create_causal_mask` uses `q_offset = past.get_seq_length()` → **layer 0** (sliding). Cropping score-cache had set sliding `cumulative_length` to local key length → full-attn masks treated queries as starting near 0 → attention mass only on **0…510**. Fix: keep sliding `cumulative_length = prefix_len` (absolute) during `crop_cache_prefix`; do not shrink sliding K/V for the score clone.
 
-**VERDICT: `TRANSFER_H1_OK_SCORER_FAIL` (hybrid)**
+**VERDICT: `TRANSFER_OK` (hybrid; budgets model-specific)**
 
-- H1 critical±R\* **transfers to Gemma-4 full layers**.  
-- Classic attention scorer / stream path **does not** transfer without a hybrid-aware score signal (non-attn or fixed score-pass mask).  
-- Sliding layers are a free local window; long-range budget is the full-attn stack only.
+- H1 critical±R\* transfers to Gemma-4 **full** layers.  
+- Posthoc tax matches primary (**176**) once score-pass offset is correct.  
+- Stream needs **more** than Qwen/Llama defaults: **1024 + R=2** (or 1536 + R=1) @4k mid.  
+- Sliding stack is a free local window; long-range budget is the full-attn layers only.
 
 ### Stream-time auto-raise + long-L policy (2026-07-15 evening)
 

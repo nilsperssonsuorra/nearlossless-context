@@ -40,7 +40,7 @@ Formally (see `RESEARCH_BRIEF.md`):
 | GPU | NVIDIA RTX 3090 **24 GB** (Windows WDDM) |
 | System RAM | 32 GB |
 | Primary model | [`Qwen/Qwen3-4B-Instruct-2507`](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) — dense full-attention GQA |
-| Transfer (hybrid) | [`google/gemma-4-E4B-it`](https://huggingface.co/google/gemma-4-E4B-it) — sliding+full; H1 ok on full layers, attn scorer fails |
+| Transfer (hybrid) | [`google/gemma-4-E4B-it`](https://huggingface.co/google/gemma-4-E4B-it) — sliding+full; H1+posthoc@176 ok; stream needs ~1024/R=2 |
 | Avoid (for classic KV work) | `Qwen3.5-4B` hybrid linear+full — different game |
 
 **Workstation policy:** prefer **≤4k** for interactive runs. Longer lengths need chunked prefill / careful jobs so the desktop does not freeze. Use `--allow-long` only when you mean it.

@@ -43,9 +43,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--model", default=TRANSFER_MODEL_ID)
     p.add_argument("--ctx", type=int, default=4096)
     p.add_argument("--depth", type=float, default=0.5)
-    p.add_argument("--also-8k", action="store_true", help="Also test stream@512 @8k mid")
+    p.add_argument("--also-8k", action="store_true", help="Also test stream arm @8k mid")
     p.add_argument("--dtype", default="bfloat16")
     p.add_argument("--max-new", type=int, default=48)
+    p.add_argument("--stream-budget", type=int, default=512)
+    p.add_argument("--posthoc-budget", type=int, default=176)
+    p.add_argument("--expand-radius", type=int, default=1, help="Valley ±R for stream/posthoc")
     return p.parse_args()
 
 
@@ -59,6 +62,9 @@ def eval_arm(
     critical: list[int],
     window: int = SNAPKV_WINDOW,
     max_new: int = 48,
+    stream_budget: int = 512,
+    posthoc_budget: int = 176,
+    expand_radius: int = 1,
 ) -> dict:
     seq_len = int(input_ids.shape[-1])
     keep = None
@@ -87,27 +93,27 @@ def eval_arm(
             span_context=1,
         )
         past = compress_keep_indices(past, keep)
-    elif arm == "stream_512":
+    elif arm.startswith("stream"):
         past, logits, st = prefill_streaming_valley(
             model,
             input_ids,
-            stream_budget=512,
-            final_budget=512,
+            stream_budget=stream_budget,
+            final_budget=stream_budget,
             chunk_size=512,
             window_size=window,
             sinks=8,
-            expand_radius=1,
+            expand_radius=expand_radius,
         )
-    elif arm == "posthoc_176":
+    elif arm.startswith("posthoc"):
         past, logits = prefill_chunked(model, input_ids, chunk_size=512)
         past, keep = compress_with_seed_valley(
             model,
             input_ids,
             past,
-            budget=176,
+            budget=posthoc_budget,
             window_size=window,
             sinks=8,
-            expand_radius=1,
+            expand_radius=expand_radius,
         )
     else:
         raise ValueError(arm)
@@ -139,8 +145,14 @@ def main() -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if args.dtype == "bfloat16" else torch.float16
 
+    stream_arm = f"stream_{args.stream_budget}"
+    posthoc_arm = f"posthoc_{args.posthoc_budget}"
     print("=== Transfer smoke ===", flush=True)
-    print(f"Model={args.model} ctx={args.ctx} depth={args.depth}", flush=True)
+    print(
+        f"Model={args.model} ctx={args.ctx} depth={args.depth} "
+        f"stream={args.stream_budget} posthoc={args.posthoc_budget} R={args.expand_radius}",
+        flush=True,
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     if tokenizer.pad_token is None:
@@ -163,7 +175,7 @@ def main() -> None:
         flush=True,
     )
 
-    arms = ["full", "oracle_r1", "anti_oracle", "stream_512", "posthoc_176"]
+    arms = ["full", "oracle_r1", "anti_oracle", stream_arm, posthoc_arm]
     for arm in arms:
         print(f"  {arm}…", flush=True)
         try:
@@ -174,6 +186,9 @@ def main() -> None:
                 arm,
                 critical=critical,
                 max_new=args.max_new,
+                stream_budget=args.stream_budget,
+                posthoc_budget=args.posthoc_budget,
+                expand_radius=args.expand_radius,
             )
         except Exception as e:
             row = {
@@ -190,6 +205,7 @@ def main() -> None:
                 "model": args.model,
                 "ctx": args.ctx,
                 "depth": args.depth,
+                "expand_radius": args.expand_radius,
             }
         )
         rows.append(row)
@@ -203,7 +219,7 @@ def main() -> None:
             torch.cuda.empty_cache()
 
     if args.also_8k:
-        print("\n=== 8k mid stream_512 ===", flush=True)
+        print(f"\n=== 8k mid {stream_arm} ===", flush=True)
         p8 = build_needle_prompt(tokenizer, 8192, 0.5)
         ids8 = tokenizer(p8, return_tensors="pt")["input_ids"].to(device)
         crit8 = find_all_critical_spans(tokenizer, ids8)
@@ -212,11 +228,21 @@ def main() -> None:
                 model,
                 tokenizer,
                 ids8,
-                "stream_512",
+                stream_arm,
                 critical=crit8,
                 max_new=args.max_new,
+                stream_budget=args.stream_budget,
+                posthoc_budget=args.posthoc_budget,
+                expand_radius=args.expand_radius,
             )
-            row.update({"model": args.model, "ctx": 8192, "depth": 0.5})
+            row.update(
+                {
+                    "model": args.model,
+                    "ctx": 8192,
+                    "depth": 0.5,
+                    "expand_radius": args.expand_radius,
+                }
+            )
             rows.append(row)
             print(
                 f"    ok={row['success']} cache={row.get('cache_tokens')} "
@@ -226,7 +252,7 @@ def main() -> None:
         except Exception as e:
             rows.append(
                 {
-                    "arm": "stream_512",
+                    "arm": stream_arm,
                     "ctx": 8192,
                     "success": False,
                     "status": f"ERR:{e}",
@@ -249,13 +275,13 @@ def main() -> None:
     full = ok("full", args.ctx)
     ora = ok("oracle_r1", args.ctx)
     anti = ok("anti_oracle", args.ctx)
-    st = ok("stream_512", args.ctx)
-    ph = ok("posthoc_176", args.ctx)
+    st = ok(stream_arm, args.ctx)
+    ph = ok(posthoc_arm, args.ctx)
 
     if full and ora and anti is False and st and ph:
         verdict = "TRANSFER_OK"
         reasons = [
-            "full+oracle+stream@512+posthoc@176 succeed; anti-oracle fails — H1+stream transfer"
+            f"full+oracle+{stream_arm}+{posthoc_arm} succeed; anti-oracle fails — H1+stream transfer"
         ]
     elif full and ora and anti is False and (st or ph):
         verdict = "TRANSFER_PARTIAL"
@@ -286,6 +312,9 @@ def main() -> None:
         "verdict": verdict,
         "reasons": reasons,
         "model": args.model,
+        "stream_budget": args.stream_budget,
+        "posthoc_budget": args.posthoc_budget,
+        "expand_radius": args.expand_radius,
         "primary_for_comparison": "Qwen/Qwen3-4B-Instruct-2507",
         "csv": str(out),
     }

@@ -298,29 +298,30 @@ def crop_cache_prefix(past: Any, prefix_len: int) -> Any:
     """
     Keep only first prefix_len positions on full layers (mutates).
 
-    For hybrid sliding layers (score-pass helper): drop the trailing
-    (S_local - keep_n) tokens so a subsequent obs-window forward can append
-    without double-counting the observation region. Sets cumulative_length to
-    the remaining key length so mask sizes match actual K/V.
+    Hybrid note (Gemma-4 etc.): HF ``create_causal_mask`` sets
+    ``q_offset = past.get_seq_length()`` which reads **layer 0**. Layer 0 is
+    usually sliding, so ``cumulative_length`` must stay at the **absolute**
+    prefix length. If we set it to the local key length after a tail drop,
+    full-attention masks treat queries as starting near 0 and attention mass
+    collapses onto positions 0…W (score-pass sink collapse).
+
+    Sliding keys are left at their windowed content (scoring only needs correct
+    full-layer attentions); we only fix ``cumulative_length`` for mask bookkeeping.
     """
-    full_S = cache_seq_len(past)
-    drop_tail = max(full_S - int(prefix_len), 0)
+    pl = int(prefix_len)
     for layer in past.layers:
         if layer.keys is None:
             continue
         if is_sliding_layer(layer):
-            s = int(layer.keys.shape[-2])
-            keep_n = max(s - drop_tail, 0)
-            if keep_n <= 0:
-                # Minimal 1-token stub so layer stays initialized.
-                keep_n = 1
-            layer.keys = layer.keys[:, :, :keep_n, :].contiguous()
-            layer.values = layer.values[:, :, :keep_n, :].contiguous()
-            layer.cumulative_length = keep_n
+            # Do not shrink sliding K/V for score-pass; keep window length so
+            # sliding mask sizes (W-1+q) still match cat(keys, new_q).
+            # Always publish absolute prefix as seen-token count for q_offset.
+            layer.cumulative_length = pl
             continue
-        pl = min(int(prefix_len), int(layer.keys.shape[-2]))
-        layer.keys = layer.keys[:, :, :pl, :].contiguous()
-        layer.values = layer.values[:, :, :pl, :].contiguous()
+        s = int(layer.keys.shape[-2])
+        keep = min(pl, s)
+        layer.keys = layer.keys[:, :, :keep, :].contiguous()
+        layer.values = layer.values[:, :, :keep, :].contiguous()
     return past
 
 
