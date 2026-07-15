@@ -107,6 +107,81 @@ At tight budgets, **span recall predicts success**: recall≲0.8 → corrupted c
 
 ---
 
+## H3 multi-needle (`h3_multi_20260715T115618Z` + budget follow-ups)
+
+**Setup:** 3 distinct secrets at depths ≈0.17 / 0.5 / 0.83, L≈4k, task **recall_all** (6 keys) + **recall_one** (mid pair).
+
+| Arm | recall_all | Notes |
+|-----|------------|--------|
+| full | **6/6** | suite valid |
+| **oracle_r1** (all crit±1 + sinks + recent) | **6/6** | keep ≈**248** tokens only |
+| anti_oracle | **0/6** | necessity holds |
+| recent@512 | **0/6** | |
+| posthoc@512 | 4/6 (recall_c≈0.79) | partial spans |
+| posthoc@1024 | 4/6 | still partial |
+| **posthoc@1536** | **6/6** (recall_c=1.0) | scorer tax vs oracle ≈**6×** |
+| stream@512 | 3/6 | |
+| stream@1536 | 5/6 | |
+| **stream@2048** | **6/6** | online multi-span OK |
+
+**recall_one** (ask mid pair only): full/oracle **ok**; posthoc@512 **ok**; stream@512 **fail**; anti **fail**.
+
+**VERDICT: `H3_MECHANISM_HOLDS` + scorer budget scales with #spans**
+
+- Multi-needle does **not** break H1/H2: keep **all** critical±R\* → full quality; drop them → fail.  
+- Oracle multi-needle still tiny (~**248** vs ~4k).  
+- Non-oracle scorers need **much larger budgets** than single-needle (posthoc **1536** vs single-needle **176**; stream **2048** vs **512**).  
+- Failure mode unchanged: truncated entities (`CRIMSON-3301`, `CRIMIN-3301`).
+
+Science takeaway: **entity-neighborhood retention generalizes to multi-needle**; the hard part is **detecting multiple disjoint critical regions** under a tight byte budget, not a new retention law.
+
+### Multi-needle scorer tax mitigation (R expand)
+
+Tried multipeak / binned selection: **no gain** (same recall curve as vanilla valley) → problem is not seed diversity among peaks.
+
+**Larger completion radius** on the same scorer:
+
+| Posthoc expand R | Min budget for 6/6 | vs oracle (~248) |
+|------------------|--------------------|------------------|
+| R=1 | **1536** | ~6.2× |
+| R=4 | still 5/6 @1280 | — |
+| **R=8** | **384** | **~1.5×** |
+
+Single-needle mid still ε=0 at **R=8, B=176**.
+
+**Takeaway:** under imperfect multi-span detection, **forgiving local completion (larger R)** recovers entity tokens near weak peaks; smarter peak ranking alone did not. Scorer tax for 3 needles drops from **~6× → ~1.5×** oracle with R=8@384.
+
+### Stream multi-needle (R=1 vs R=8)
+
+| Stream expand | Min budget for 6/6 @4k | Peak cache |
+|---------------|------------------------|------------|
+| R=1 | **2048** | ~2560 |
+| **R=8** | **1024** | **~1536** |
+
+R=8 halves stream multi-needle budget (not as large a win as posthoc 1536→384, but real).
+
+### Multi-hop two-fact (`h3_hop_20260715T121216Z`)
+
+Link: Alice → E-4412 → maple-quartz-19 (facts at ~0.3 / ~0.7 depth).
+
+| Arm | Success | Cache |
+|-----|---------|-------|
+| full | **yes** | ~4k |
+| oracle_r1 (both facts ±1) | **yes** | **~167** |
+| anti_oracle | **no** | ~156 |
+| recent | no | 512 |
+| posthoc R=1/8 @512 | **yes** | ~519 |
+| stream R=1/8 @512 | **yes** | ~519 |
+| posthoc R=8 @384 | **yes** | ~391 |
+
+**VERDICT: `HOP_SUPPORTED`**
+
+- Two-hop single answer still fits the **critical-span** story (both bridge facts).  
+- Scorers handle this easier than 3-way recall_all (one password target).  
+- Necessity holds: drop critical spans → wrong answer.
+
+---
+
 ## Streaming prefill compress (`streaming_20260714T223948Z` + sweeps)
 
 **Goal:** cut *peak* KV during prefill (not only final decode KV).
@@ -257,13 +332,13 @@ Previous Ada path padded per-head lists to `max_k`, so effective length was ~200
 - **Streaming @512:** \(L_\varepsilon=8\mathrm{k}\) all depths; peak cache ~1k.  
 - **Streaming @1536:** \(L_\varepsilon \ge 16\mathrm{k}\) all depths; peak cache ~2k, decode ~216 MB vs full ~2.3 GB.  
 
-Not yet: online@176, multi-hop / multi-needle, multi-model, adaptive budget vs L.
+Not yet: multi-model transfer, online@176, multi-needle all the way to oracle budgets, harder multi-hop chains.
 
 ---
 
 ## Next (optional)
 
-1. **Adaptive stream budget** vs L (or better mid-stream scorer) so 16k works near 512–1024  
-2. Multi-needle / multi-hop kill (H3)  
-3. Close posthoc scorer tax 176→155  
-4. int8-packed decode; second model later
+1. Adaptive **R and budget** vs #entities / L  
+2. Harder multi-hop (3+ hops, distractors)  
+3. Close residual scorer tax to oracle  
+4. int8 decode; second model

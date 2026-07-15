@@ -69,6 +69,8 @@ pip install -r requirements.txt
 | `experiments/bench_scorer_budget.py` | Non-oracle scorer vs oracle at tight budgets |
 | `experiments/bench_l_epsilon.py` | **L_ε** vs length (chunked prefill + budgeted KV) |
 | `experiments/bench_streaming.py` | Online vs posthoc compress (peak cache / VRAM) |
+| `experiments/bench_h3_multi.py` | **H3** multi-needle (2–3 secrets) kill + scorers |
+| `experiments/bench_h3_hop.py` | Two-fact multi-hop smoke (Alice→id→password) |
 | `experiments/scorer_valley.py` | seed_valley + streaming prefill helpers |
 | `experiments/bench_ceiling.py` | Dense full-KV ceiling: VRAM / speed / needle vs \(L\) |
 | `experiments/bench_context_tax.py` | Decode/VRAM tax vs length |
@@ -86,9 +88,11 @@ python experiments\bench_h2_bytes.py --ctx 4096 --depths 0.0,0.5,1.0 --R 1
 python experiments\bench_scorer_budget.py --ctx 4096 --budgets 168,192,256,384,512 --R 1
 python experiments\bench_l_epsilon.py --lengths 4096,6144,8192 --allow-long --mid-only --budgets 176,256
 python experiments\bench_streaming.py --lengths 4096,8192 --allow-long --budget 176 --stream-hi 512
+python experiments\bench_h3_multi.py --ctx 4096 --n-needles 3 --budget 1536 --stream-budget 2048
+python experiments\bench_h3_hop.py --ctx 4096 --budget 512
 ```
 
-Latest: posthoc **@176 ~42×** decode KV @8k; **stream@512 → \(L_\varepsilon=8\mathrm{k}\)**; **stream@1536 → \(L_\varepsilon\ge16\mathrm{k}\)** (~8× lower peak cache vs full).
+Latest: stream \(L_\varepsilon\ge16\mathrm{k}\); multi-needle posthoc **R=8@384** / stream **R=8@1024**; two-hop **HOP_SUPPORTED** (oracle@~167).
 
 ### Ceiling map
 
@@ -118,9 +122,11 @@ Outputs: `results/*.csv` + `*.json` (gitignored). Narrative: `results/FINDINGS.m
 - **Scorer:** **seed_valley@176** ε=0; beats SnapKV@192 at 4k; oracle@**~155**  
 - **L_ε (mid):** full and posthoc@176 reach **8k**; decode KV **~27 MB vs ~1.1 GB**  
 - **Streaming:** @512 → \(L_\varepsilon=8\mathrm{k}\); **@1536 → \(L_\varepsilon\ge16\mathrm{k}\)** (peak cache ~2k, ~9 GB VRAM)  
+- **H3 multi-needle:** posthoc **R=8@384**; stream **R=8@1024** (vs R=1@2048)  
+- **Two-hop:** oracle + scorers @512 work; anti-oracle fails  
 - Chunked prefill makes long context interactive on WDDM  
 
-**Next (goal-aligned):** adaptive/tighter stream budgets; multi-hop (H3).
+**Next (goal-aligned):** adaptive R/budget; harder multi-hop; residual tax to oracle.
 
 ---
 

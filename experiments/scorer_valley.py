@@ -181,6 +181,269 @@ def select_seed_valley(
     return sorted(chosen)[:budget]
 
 
+def find_local_maxima(
+    score_prefix: torch.Tensor,
+    prefix_len: int,
+    *,
+    min_score: float | None = None,
+) -> list[int]:
+    """Strict local peaks (plateaus: keep leftmost max)."""
+    n = min(prefix_len, int(score_prefix.numel()))
+    if n <= 0:
+        return []
+    sc = score_prefix[:n]
+    if min_score is None:
+        # keep peaks above median of positive-ish mass
+        min_score = float(sc.median().item())
+    peaks: list[int] = []
+    for i in range(n):
+        v = float(sc[i].item())
+        if v < min_score or v <= -1e8:
+            continue
+        left = float(sc[i - 1].item()) if i > 0 else -1e30
+        right = float(sc[i + 1].item()) if i + 1 < n else -1e30
+        if v >= left and v > right:
+            peaks.append(i)
+        elif v > left and v >= right:
+            peaks.append(i)
+    return peaks
+
+
+def select_seed_valley_multipeak(
+    score_prefix: torch.Tensor,
+    *,
+    seq_len: int,
+    prefix_len: int,
+    budget: int,
+    sinks: int,
+    window_size: int,
+    expand_radius: int = 1,
+    min_sep: int = 64,
+    max_peaks: int = 16,
+) -> list[int]:
+    """
+    Multi-needle aware selection: cover diverse local maxima first (separated
+    by min_sep), grow each valley, then fill remainder with vanilla seed_valley.
+    """
+    budget = min(budget, seq_len)
+    recent = list(range(max(0, seq_len - window_size), seq_len))
+    sink_idx = list(range(min(sinks, prefix_len, seq_len)))
+    forced = set(sink_idx) | set(recent)
+    if len(forced) >= budget:
+        keep = sorted(set(recent) | set(sink_idx[: max(0, budget - len(recent))]))
+        return keep[:budget]
+
+    n_pref = min(prefix_len, int(score_prefix.numel()))
+    sc = score_prefix[:n_pref].float().clone()
+    for i in sink_idx:
+        if i < n_pref:
+            sc[i] = -1e9
+
+    # Local maxima ranked by score
+    peaks = find_local_maxima(score_prefix, n_pref)
+    peaks = [p for p in peaks if float(sc[p].item()) > -1e8]
+    peaks.sort(key=lambda i: float(score_prefix[i].item()), reverse=True)
+
+    chosen: set[int] = set(forced)
+    seed_centers: list[int] = []
+    covered: set[int] = set()
+
+    def add_seed(s: int) -> bool:
+        nonlocal chosen, covered
+        if s < 0 or s >= n_pref:
+            return False
+        if any(abs(s - c) < min_sep for c in seed_centers):
+            return False
+        nbhd = grow_valley(score_prefix, s, n_pref)
+        for d in range(-expand_radius, expand_radius + 1):
+            j = s + d
+            if 0 <= j < n_pref:
+                nbhd.add(j)
+        new = nbhd - chosen
+        if not new and s in chosen:
+            seed_centers.append(s)
+            covered |= nbhd
+            return True
+        if len(chosen) + len(new) > budget:
+            ranked = sorted(new, key=lambda i: -float(score_prefix[i].item()))
+            for j in ranked:
+                if len(chosen) >= budget:
+                    break
+                chosen.add(j)
+            seed_centers.append(s)
+            covered |= nbhd
+            return len(chosen) >= budget
+        chosen |= new
+        seed_centers.append(s)
+        covered |= nbhd
+        return len(chosen) >= budget
+
+    for p in peaks:
+        if len(seed_centers) >= max_peaks:
+            break
+        if len(chosen) >= budget:
+            break
+        add_seed(int(p))
+
+    # Also diversify over global top-k if few peaks found
+    if len(seed_centers) < max(3, max_peaks // 2) and len(chosen) < budget:
+        order = torch.argsort(sc, descending=True).tolist()
+        for s in order:
+            if len(seed_centers) >= max_peaks or len(chosen) >= budget:
+                break
+            s = int(s)
+            if float(sc[s].item()) <= -1e8:
+                continue
+            add_seed(s)
+
+    # Fill rest with dense seed_valley (no sep constraint)
+    if len(chosen) < budget:
+        rest = select_seed_valley(
+            score_prefix,
+            seq_len=seq_len,
+            prefix_len=prefix_len,
+            budget=budget,
+            sinks=sinks,
+            window_size=window_size,
+            expand_radius=expand_radius,
+        )
+        for i in rest:
+            if len(chosen) >= budget:
+                break
+            chosen.add(i)
+
+    return sorted(chosen)[:budget]
+
+
+def select_seed_valley_binned(
+    score_prefix: torch.Tensor,
+    *,
+    seq_len: int,
+    prefix_len: int,
+    budget: int,
+    sinks: int,
+    window_size: int,
+    expand_radius: int = 1,
+    n_bins: int = 8,
+    seeds_per_bin: int = 2,
+) -> list[int]:
+    """
+    Spatial coverage: take top seeds inside each depth bin, grow valleys.
+    Guarantees multi-needle positions are not all stolen by one high-attn region.
+    """
+    budget = min(budget, seq_len)
+    recent = list(range(max(0, seq_len - window_size), seq_len))
+    sink_idx = list(range(min(sinks, prefix_len, seq_len)))
+    forced = set(sink_idx) | set(recent)
+    if len(forced) >= budget:
+        keep = sorted(set(recent) | set(sink_idx[: max(0, budget - len(recent))]))
+        return keep[:budget]
+
+    n_pref = min(prefix_len, int(score_prefix.numel()))
+    sc = score_prefix[:n_pref].float().clone()
+    for i in sink_idx:
+        if i < n_pref:
+            sc[i] = -1e9
+
+    n_bins = max(1, min(n_bins, n_pref))
+    bin_size = max(1, (n_pref + n_bins - 1) // n_bins)
+    chosen: set[int] = set(forced)
+
+    for b in range(n_bins):
+        lo = b * bin_size
+        hi = min(n_pref, (b + 1) * bin_size)
+        if lo >= hi:
+            continue
+        seg = sc[lo:hi]
+        k = min(seeds_per_bin, hi - lo)
+        top = torch.topk(seg, k=k).indices.tolist()
+        for ti in top:
+            s = lo + int(ti)
+            if float(sc[s].item()) <= -1e8:
+                continue
+            nbhd = grow_valley(score_prefix, s, n_pref)
+            for d in range(-expand_radius, expand_radius + 1):
+                j = s + d
+                if 0 <= j < n_pref:
+                    nbhd.add(j)
+            new = nbhd - chosen
+            if len(chosen) + len(new) <= budget:
+                chosen |= new
+            else:
+                for j in sorted(new, key=lambda i: -float(score_prefix[i].item())):
+                    if len(chosen) >= budget:
+                        break
+                    chosen.add(j)
+            if len(chosen) >= budget:
+                break
+        if len(chosen) >= budget:
+            break
+
+    if len(chosen) < budget:
+        rest = select_seed_valley(
+            score_prefix,
+            seq_len=seq_len,
+            prefix_len=prefix_len,
+            budget=budget,
+            sinks=sinks,
+            window_size=window_size,
+            expand_radius=expand_radius,
+        )
+        for i in rest:
+            if len(chosen) >= budget:
+                break
+            chosen.add(i)
+    return sorted(chosen)[:budget]
+
+
+def _select_keep(
+    score: torch.Tensor,
+    *,
+    seq_len: int,
+    prefix_len: int,
+    budget: int,
+    sinks: int,
+    window_size: int,
+    expand_radius: int,
+    mode: str,
+    min_sep: int,
+    max_peaks: int,
+) -> list[int]:
+    if mode == "multipeak":
+        return select_seed_valley_multipeak(
+            score,
+            seq_len=seq_len,
+            prefix_len=prefix_len,
+            budget=budget,
+            sinks=sinks,
+            window_size=window_size,
+            expand_radius=expand_radius,
+            min_sep=min_sep,
+            max_peaks=max_peaks,
+        )
+    if mode == "binned":
+        return select_seed_valley_binned(
+            score,
+            seq_len=seq_len,
+            prefix_len=prefix_len,
+            budget=budget,
+            sinks=sinks,
+            window_size=window_size,
+            expand_radius=expand_radius,
+            n_bins=max(4, max_peaks // 2),
+            seeds_per_bin=2,
+        )
+    return select_seed_valley(
+        score,
+        seq_len=seq_len,
+        prefix_len=prefix_len,
+        budget=budget,
+        sinks=sinks,
+        window_size=window_size,
+        expand_radius=expand_radius,
+    )
+
+
 @torch.inference_mode()
 def compress_with_seed_valley(
     model,
@@ -192,11 +455,15 @@ def compress_with_seed_valley(
     sinks: int = 8,
     expand_radius: int = 1,
     score_layers: int = 8,
+    mode: str = "valley",
+    min_sep: int = 64,
+    max_peaks: int = 16,
 ) -> tuple[Any, list[int]]:
     """
     Score obs-window attention on full past, select seed_valley keep set, compress.
     Mutates past. Returns (past, keep_indices).
     Requires cache_seq_len(past) == input_ids length (full post-hoc path).
+    mode: "valley" | "multipeak"
     """
     from bench_h1_oracle import compress_keep_indices
     from snapkv import cache_seq_len
@@ -225,7 +492,7 @@ def compress_with_seed_valley(
         window_size=window_size,
         score_layers=score_layers,
     )
-    keep = select_seed_valley(
+    keep = _select_keep(
         score,
         seq_len=seq_len,
         prefix_len=prefix_len,
@@ -233,6 +500,9 @@ def compress_with_seed_valley(
         sinks=sinks,
         window_size=window_size,
         expand_radius=expand_radius,
+        mode=mode,
+        min_sep=min_sep,
+        max_peaks=max_peaks,
     )
     past = compress_keep_indices(past, keep)
     if torch.cuda.is_available():
@@ -314,6 +584,9 @@ def compress_past_seed_valley(
     sinks: int = 8,
     expand_radius: int = 1,
     score_layers: int = 8,
+    mode: str = "valley",
+    min_sep: int = 64,
+    max_peaks: int = 16,
 ) -> tuple[Any, list[int]]:
     """
     Compress current past (possibly already shorter than prompt) to `budget`.
@@ -350,7 +623,7 @@ def compress_past_seed_valley(
         score_layers=score_layers,
     )
     # select in *cache* index space (length S)
-    keep = select_seed_valley(
+    keep = _select_keep(
         score,
         seq_len=S,
         prefix_len=prefix_len,
@@ -358,6 +631,9 @@ def compress_past_seed_valley(
         sinks=sinks,
         window_size=window_size,
         expand_radius=expand_radius,
+        mode=mode,
+        min_sep=min_sep,
+        max_peaks=max_peaks,
     )
     past = compress_keep_indices(past, keep)
     if torch.cuda.is_available():
@@ -377,6 +653,9 @@ def prefill_streaming_valley(
     sinks: int = 8,
     expand_radius: int = 1,
     score_layers: int = 8,
+    mode: str = "valley",
+    min_sep: int = 64,
+    max_peaks: int = 16,
 ) -> tuple[Any, torch.Tensor, dict]:
     """
     Chunked prefill with online seed_valley compress whenever cache > stream_budget.
@@ -431,6 +710,9 @@ def prefill_streaming_valley(
                 sinks=sinks,
                 expand_radius=expand_radius,
                 score_layers=score_layers,
+                mode=mode,
+                min_sep=min_sep,
+                max_peaks=max_peaks,
             )
             n_compress += 1
             peak_cache = max(peak_cache, cache_seq_len(past))
@@ -448,6 +730,9 @@ def prefill_streaming_valley(
             sinks=sinks,
             expand_radius=expand_radius,
             score_layers=score_layers,
+            mode=mode,
+            min_sep=min_sep,
+            max_peaks=max_peaks,
         )
         n_compress += 1
 
@@ -458,5 +743,6 @@ def prefill_streaming_valley(
         "n_compress": n_compress,
         "stream_budget": stream_budget,
         "final_budget": final_budget,
+        "mode": mode,
     }
     return past, last_logits, stats
