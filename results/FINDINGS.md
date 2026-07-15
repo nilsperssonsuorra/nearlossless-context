@@ -219,6 +219,14 @@ Lab schedule maps (n_entities, L, multi_hop) → (R, budget, stream_budget).
 - Stream still needs **entity hint or conservative multi budget** — L-only fails multi/hop3.  
 - True n_entities remains best; auto is usable for **posthoc**.
 
+### Stream-time auto-raise + long-L policy (2026-07-15 evening)
+
+| Change | Result |
+|--------|--------|
+| Mid-stream peak probe **before first hard drop** (`auto_raise_budget`) | multi3 stream **without** `n_entities`: **6/6** (raised to budget 1024, R=8) |
+| L≥28k policy → stream **2048** | 28k mid **ok** (was flake @1536) |
+| Optional **int8** final fake-quant | single posthoc@176: quality ok; logical ~**12.6 MB** vs runtime ~27 MB |
+
 ---
 
 ## Streaming prefill compress (`streaming_20260714T223948Z` + sweeps)
@@ -271,21 +279,22 @@ All depths {0, 0.5, 1.0}; peak cache ≈ budget + chunk (512).
 
 ### Practical max-L ceiling (stream, single-needle, all depths)
 
-Extended probe 2026-07-15 (stream valley R=1):
+Extended probe 2026-07-15 (stream valley R=1, budget 1536):
 
-| L | stream@1536 | peak cache | peak VRAM |
-|---|-------------|------------|-----------|
-| 16k | **PASS 3/3** | ~2048 | ~9.1 GB |
-| **20k** | **PASS 3/3** | ~2048 | ~9.1 GB |
-| **24k** | **PASS 3/3** | ~2048 | ~9.1 GB |
+| L | stream@1536 | Notes |
+|---|-------------|--------|
+| 16–24k | **PASS 3/3** | solid |
+| 28k | mid **FAIL** once | **PASS** mid @ B=2048 |
+| 32k | **PASS 3/3** | |
+| **40k** | **PASS 3/3** | peak cache ~2048, VRAM ~9.1 GB |
 
-Also PASS at B=2048 / 2560 (higher peak, not needed for quality).
+**Comfortable / reliable:** **~24k** @1536.  
+**Observed max this suite:** **≥40k** @1536 (all depths); quality edge can be **noisy** (~28k mid flaked).  
+**Peak resources stay flat** (~2k cache tokens, ~9 GB) as L grows — the whole point of streaming.
 
-**\(L_\varepsilon(\mathrm{stream@1536}) \ge 24576\)** on single-needle (not yet failed).
+vs “before” **~4k comfortable full**: about **6–10×** longer near-lossless single-needle context.
 
-vs workstation “before”: **~4k comfortable full / 8k lag** → **~24k** near-lossless needle with stream (**~6×** length), peak VRAM flat ~9 GB.
-
-API: `compress_adaptive.prefill_auto(model, ids, mode="stream")`.
+API: `prefill_auto(model, ids, mode="stream")`; multi-secret → `safe_multi=True` or `n_entities=3`.
 
 ---
 
@@ -386,16 +395,15 @@ Previous Ada path padded per-head lists to `max_k`, so effective length was ~200
 
 **Systems:**  
 - **Posthoc** seed_valley@176: ~**42×** decode KV @8k mid (full peak).  
-- **Streaming @512 / @1536:** \(L_\varepsilon=8\mathrm{k}\) / **\(\ge24\mathrm{k}\)** single-needle (peak ~2k, ~9 GB).  
-- **Adaptive posthoc** (sink-masked peak n̂ + schedule): passes single / multi3 / hop3. Stream needs n prior.  
-- **`prefill_auto`**: one-call stream/posthoc/full entrypoint.  
+- **Streaming @1536:** reliable **~24k**, observed **≥40k** single-needle (peak ~2k, ~9 GB; 28k mid noisy).  
+- **Adaptive posthoc** + **`prefill_auto`** (`safe_multi` for multi-secret stream).  
 
-Not yet: multi-model transfer, online@176, multi-needle at true oracle keep size, stream auto without n hint.
+Not yet: multi-model transfer, online@176, multi-needle at true oracle keep size, true int8 kernels (not fake-quant).
 
 ---
 
 ## Next (optional)
 
-1. Stream-time entity estimate (without full past)  
-2. Residual tax to oracle; int8 decode; second model  
-3. Public writeup of H1–H3 + adaptive schedule
+1. Residual scorer tax → oracle keep size  
+2. True int8 attention / second model family  
+3. Public writeup (`RESEARCH_SUMMARY.md` draft)

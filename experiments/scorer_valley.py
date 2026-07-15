@@ -656,6 +656,8 @@ def prefill_streaming_valley(
     mode: str = "valley",
     min_sep: int = 64,
     max_peaks: int = 16,
+    auto_raise_budget: bool = False,
+    multi_budget_floor: int = 1024,
 ) -> tuple[Any, torch.Tensor, dict]:
     """
     Chunked prefill with online seed_valley compress whenever cache > stream_budget.
@@ -663,11 +665,18 @@ def prefill_streaming_valley(
     Peak KV stays near stream_budget (+ one chunk), not full L.
     final_budget: optional tighter compress at end (default = stream_budget).
 
+    auto_raise_budget: before first hard compress, estimate n_entities from
+    mid-stream scores; if ≥2, raise stream_budget floor to multi_budget_floor
+    (and bump expand_radius to at least 8). Must run *before* dropping spans.
+
     Returns (past, last_logits, stats).
     """
+    from adaptive import estimate_n_entities_from_scores
     from snapkv import cache_nbytes, cache_seq_len
 
-    final_budget = final_budget if final_budget is not None else stream_budget
+    dyn_budget = int(stream_budget)
+    dyn_R = int(expand_radius)
+    final_budget = final_budget if final_budget is not None else dyn_budget
     seq_len = int(input_ids.shape[-1])
     device = input_ids.device
     past = None
@@ -675,6 +684,9 @@ def prefill_streaming_valley(
     chunk_size = max(int(chunk_size), 1)
     peak_cache = 0
     n_compress = 0
+    n_hat = None
+    raised = False
+    probe_at = min(max(dyn_budget, 512), max(seq_len // 4, 512))
 
     for start in range(0, seq_len, chunk_size):
         end = min(start + chunk_size, seq_len)
@@ -699,16 +711,51 @@ def prefill_streaming_valley(
 
         peak_cache = max(peak_cache, cache_seq_len(past))
 
+        # Mid-stream entity estimate before first aggressive drop
+        if (
+            auto_raise_budget
+            and not raised
+            and past is not None
+            and cache_seq_len(past) >= probe_at
+        ):
+            try:
+                S = cache_seq_len(past)
+                w = min(window_size, S - 1, end - 1)
+                if w >= 8:
+                    obs_ids = input_ids[:, end - w : end]
+                    attns, w, pref = obs_attentions_on_past(
+                        model, obs_ids, past, abs_obs_start=end - w
+                    )
+                    if attns is not None and any(a is not None for a in attns):
+                        h_kv = past.layers[0].keys.shape[1]
+                        score = aggregate_prefix_vote(
+                            attns,
+                            h_kv=h_kv,
+                            prefix_len=pref,
+                            window_size=w,
+                            score_layers=score_layers,
+                        )
+                        n_hat = estimate_n_entities_from_scores(
+                            score, prefix_len=pref
+                        )
+                        if n_hat >= 2:
+                            dyn_budget = max(dyn_budget, multi_budget_floor)
+                            dyn_R = max(dyn_R, 8)
+                            final_budget = max(final_budget, dyn_budget)
+                        raised = True
+            except Exception:
+                raised = True  # don't retry forever
+
         # Online compress after chunk if over stream budget
-        if cache_seq_len(past) > stream_budget:
+        if cache_seq_len(past) > dyn_budget:
             past, _ = compress_past_seed_valley(
                 model,
                 input_ids[:, :end],
                 past,
-                budget=stream_budget,
+                budget=dyn_budget,
                 window_size=window_size,
                 sinks=sinks,
-                expand_radius=expand_radius,
+                expand_radius=dyn_R,
                 score_layers=score_layers,
                 mode=mode,
                 min_sep=min_sep,
@@ -728,7 +775,7 @@ def prefill_streaming_valley(
             budget=final_budget,
             window_size=window_size,
             sinks=sinks,
-            expand_radius=expand_radius,
+            expand_radius=dyn_R,
             score_layers=score_layers,
             mode=mode,
             min_sep=min_sep,
@@ -741,8 +788,11 @@ def prefill_streaming_valley(
         "final_cache_tokens": cache_seq_len(past),
         "final_kv_mb": round(cache_nbytes(past) / (1024**2), 3),
         "n_compress": n_compress,
-        "stream_budget": stream_budget,
+        "stream_budget": dyn_budget,
         "final_budget": final_budget,
         "mode": mode,
+        "n_entities_hat": n_hat,
+        "auto_raise_budget": auto_raise_budget,
+        "expand_radius": dyn_R,
     }
     return past, last_logits, stats

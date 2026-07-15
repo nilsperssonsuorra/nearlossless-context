@@ -131,7 +131,7 @@ A claim that SnapKV is new, or that int8 is new. Those are tools for testing H1.
 | Necessity fails | Rebuild suite until gold requires the span |
 | H1 only works for single needle | H3: multi-hop needs **relational** retention (edges, not entities) |
 
-**Status (2026-07-15):** H1–H3 green; stream single-needle **\(L_\varepsilon\ge24\mathrm{k}\)** @1536; adaptive posthoc_auto; `prefill_auto`. Stream multi still needs n prior. **Next:** stream-time n̂; residual tax; transfer/writeup.
+**Status (2026-07-15):** H1–H3 green; stream **≥40k** single-needle; mid-stream auto-raise for multi; L≥28k@2048; int8 logical option; see `RESEARCH_SUMMARY.md`. **Next:** residual tax; true int8 kernels; transfer.
 
 Do **not** add new methods until the kill experiment is green or H1 is revised.
 

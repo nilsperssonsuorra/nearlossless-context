@@ -61,6 +61,7 @@ def prefill_posthoc_adaptive(
     n_entities: int | None = None,
     min_sep: int = 200,
     score_layers: int = 8,
+    use_int8: bool = False,
 ) -> tuple[Any, torch.Tensor, dict]:
     """
     Chunked full prefill → obs attention → estimate n_entities (optional) →
@@ -109,6 +110,10 @@ def prefill_posthoc_adaptive(
         score_layers=score_layers,
         mode=pol.mode,
     )
+    logical_mb = None
+    if use_int8:
+        past, logical = _apply_int8_logical(past)
+        logical_mb = round(logical / (1024**2), 3)
     info = {
         "path": "posthoc_adaptive",
         "n_entities_hat": n_hat,
@@ -116,8 +121,26 @@ def prefill_posthoc_adaptive(
         "keep_count": len(keep),
         "cache_tokens": cache_seq_len(past),
         "L": seq_len,
+        "logical_kv_mb_int8": logical_mb,
+        "use_int8": use_int8,
     }
     return past, logits, info
+
+
+def _apply_int8_logical(past) -> tuple[Any, int]:
+    """Fake-quant KV to int8 (dequant for HF); return logical nbytes."""
+    from bytebudget import quant_dequant_int8
+
+    logical = 0
+    for layer in past.layers:
+        if layer.keys is None:
+            continue
+        k, lk = quant_dequant_int8(layer.keys)
+        v, lv = quant_dequant_int8(layer.values)
+        layer.keys = k.contiguous()
+        layer.values = v.contiguous()
+        logical += lk + lv
+    return past, logical
 
 
 @torch.inference_mode()
@@ -131,12 +154,14 @@ def prefill_stream_adaptive(
     multi_hop: bool = False,
     n_entities: int | None = None,
     score_layers: int = 8,
+    auto_raise_budget: bool | None = None,
+    use_int8: bool = False,
 ) -> tuple[Any, torch.Tensor, dict]:
     """
     Streaming compress with adaptive stream_budget.
 
-    Without n_entities, uses L-only schedule (n_entities=1) then optional
-    final tighten is not applied (stream keeps stream_budget).
+    Without n_entities, uses L-only schedule (n_entities=1) and optionally
+    auto_raise_budget mid-stream if peaks look multi-entity.
     Prefer passing n_entities when known (e.g. multi-doc).
     """
     seq_len = int(input_ids.shape[-1])
@@ -147,6 +172,9 @@ def prefill_stream_adaptive(
         multi_hop=multi_hop,
         prefer_stream=True,
     )
+    # Auto-raise only when n_entities not provided (discovery mode)
+    if auto_raise_budget is None:
+        auto_raise_budget = n_entities is None
     past, logits, stats = prefill_streaming_valley(
         model,
         input_ids,
@@ -158,13 +186,21 @@ def prefill_stream_adaptive(
         expand_radius=pol.R,
         score_layers=score_layers,
         mode=pol.mode,
+        auto_raise_budget=auto_raise_budget,
+        multi_budget_floor=max(1024, pol.stream_budget),
     )
+    logical_mb = None
+    if use_int8:
+        past, logical = _apply_int8_logical(past)
+        logical_mb = round(logical / (1024**2), 3)
     info = {
         "path": "stream_adaptive",
-        "n_entities_hat": n_ent,
+        "n_entities_hat": stats.get("n_entities_hat", n_ent),
         "policy": pol.__dict__,
         "stats": stats,
         "L": seq_len,
+        "logical_kv_mb_int8": logical_mb,
+        "use_int8": use_int8,
     }
     return past, logits, info
 
@@ -177,6 +213,8 @@ def prefill_auto(
     mode: str = "stream",
     n_entities: int | None = None,
     multi_hop: bool = False,
+    safe_multi: bool = False,
+    use_int8: bool = False,
     chunk_size: int = 512,
     window_size: int = 128,
     sinks: int = 8,
@@ -190,10 +228,16 @@ def prefill_auto(
       "full"    — chunked full KV (no compress)
 
     Recommended:
-      long single-doc retrieval → mode="stream", n_entities=1 (or omit)
-      multi-secret / multi-doc → mode="stream", n_entities=3 (or more)
+      long single-doc retrieval → mode="stream" (omit n_entities)
+      multi-secret / multi-doc → mode="stream", n_entities=3 or safe_multi=True
       best quality post-score → mode="posthoc"
+
+    safe_multi: if True and n_entities is None, use n_entities=3 schedule
+    (avoids stream@512 distractor failures on multi-hop / multi-needle).
+    use_int8: fake-quant final KV for ~2× logical byte accounting (HF still dequants).
     """
+    if safe_multi and n_entities is None:
+        n_entities = 3
     if mode == "full":
         past, logits = prefill_chunked(model, input_ids, chunk_size=chunk_size)
         info = {
@@ -212,6 +256,7 @@ def prefill_auto(
             sinks=sinks,
             multi_hop=multi_hop,
             n_entities=n_entities,
+            use_int8=use_int8,
         )
     if mode == "stream":
         return prefill_stream_adaptive(
@@ -222,5 +267,6 @@ def prefill_auto(
             sinks=sinks,
             multi_hop=multi_hop,
             n_entities=n_entities,
+            use_int8=use_int8,
         )
     raise ValueError(f"unknown mode {mode!r}; use stream|posthoc|full")

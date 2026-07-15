@@ -98,7 +98,7 @@ python experiments\bench_h3_hop3.py --ctx 4096
 python experiments\bench_adaptive_e2e.py --ctx 4096
 ```
 
-Latest: stream single-needle **\(L_\varepsilon\ge24\mathrm{k}\)** @1536 (~9 GB peak); **prefill_auto**; adaptive posthoc_auto ok.
+Latest: stream **≥40k** single-needle; auto-raise multi stream; L≥28k→2048; `RESEARCH_SUMMARY.md` + int8 option.
 
 ### Ceiling map
 
@@ -127,7 +127,8 @@ Outputs: `results/*.csv` + `*.json` (gitignored). Narrative: `results/FINDINGS.m
 - **H2:** at fixed bytes, priority (crit±R\*) beats equal/2× volume without critical spans  
 - **Scorer:** **seed_valley@176** ε=0; beats SnapKV@192 at 4k; oracle@**~155**  
 - **L_ε (mid):** full and posthoc@176 reach **8k**; decode KV **~27 MB vs ~1.1 GB**  
-- **Streaming:** @512 → 8k; **@1536 → \(\ge24\mathrm{k}\)** single-needle (peak cache ~2k, ~9 GB)  
+- **Streaming @1536:** reliable **~24k**, observed **≥40k** single-needle (~2k peak cache, ~9 GB)  
+- **USAGE.md** — how to call `prefill_auto`
 - **H3 multi-needle:** posthoc **R=8@384**; stream **R=8@1024** (vs R=1@2048)  
 - **Two-hop / 3-hop+distractors:** critical spans hold; **stream@512 can pick distractors**  
 - **Adaptive E2E:** posthoc auto ok; stream needs entity prior; peak n̂ after sink-mask  
@@ -141,7 +142,9 @@ Outputs: `results/*.csv` + `*.json` (gitignored). Narrative: `results/FINDINGS.m
 
 | File | Content |
 |------|---------|
-| `RESEARCH_BRIEF.md` | Literature notes, early invention framing |
+| `USAGE.md` | How to call `prefill_auto` + length guide |
+| `RESEARCH_SUMMARY.md` | Short hire-aligned summary of results |
+| `RESEARCH_BRIEF.md` | North-star brief + status |
 | `papers/NOTES.md` | Paper cards (SnapKV, PyramidKV, Ada-KV, KIVI, RocketKV, …) |
 | `results/FINDINGS.md` | Experimental findings |
 

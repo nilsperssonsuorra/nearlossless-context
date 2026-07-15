@@ -94,12 +94,19 @@ def policy_for(
             stream_budget=1024,
             note="single ~12k: raise stream (mid fails @512)",
         )
-    # 16k–24k class (measured: stream@1536 passes all depths through 24k)
+    if L <= 24576:
+        return AdaptivePolicy(
+            R=1,
+            budget=256,
+            stream_budget=1536,
+            note="single @16k–24k stream@1536 (reliable)",
+        )
+    # ≥28k: mid-depth can flake at 1536 → use 2048
     return AdaptivePolicy(
         R=1,
-        budget=256,
-        stream_budget=1536,
-        note="single @16k–24k stream@1536 (peak cache~2k, VRAM~9GB)",
+        budget=320,
+        stream_budget=2048,
+        note="single ≥28k stream@2048 (stabilizes mid flake at 28k)",
     )
 
 
