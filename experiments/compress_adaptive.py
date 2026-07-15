@@ -11,14 +11,26 @@ from typing import Any
 
 import torch
 
-from adaptive import AdaptivePolicy, policy_for, policy_from_scores
+from adaptive import (  # noqa: F401
+    AdaptivePolicy,
+    model_id_from_model,
+    policy_for,
+    policy_from_scores,
+)
 from scorer_valley import (
     aggregate_prefix_vote,
     compress_with_seed_valley,
     obs_attentions,
     prefill_streaming_valley,
 )
-from snapkv import cache_seq_len, prefill_chunked
+from snapkv import cache_seq_len, full_layer_h_kv, prefill_chunked
+
+
+def _resolve_model_id(model, model_id: str | None) -> str | None:
+    if model_id:
+        return model_id
+    mid = model_id_from_model(model)
+    return mid or None
 
 
 @torch.inference_mode()
@@ -38,7 +50,7 @@ def score_prefix_from_past(
         # flat dummy scores
         s = cache_seq_len(past)
         return torch.zeros(max(s, 1), device=input_ids.device), max(s - 1, 0), window_size
-    h_kv = past.layers[0].keys.shape[1]
+    h_kv = full_layer_h_kv(past)
     score = aggregate_prefix_vote(
         attns,
         h_kv=h_kv,
@@ -62,6 +74,7 @@ def prefill_posthoc_adaptive(
     min_sep: int = 200,
     score_layers: int = 8,
     use_int8: bool = False,
+    model_id: str | None = None,
 ) -> tuple[Any, torch.Tensor, dict]:
     """
     Chunked full prefill → obs attention → estimate n_entities (optional) →
@@ -69,6 +82,7 @@ def prefill_posthoc_adaptive(
 
     Returns (past, last_logits, info).
     """
+    mid = _resolve_model_id(model, model_id)
     seq_len = int(input_ids.shape[-1])
     past, logits = prefill_chunked(model, input_ids, chunk_size=chunk_size)
 
@@ -86,6 +100,7 @@ def prefill_posthoc_adaptive(
             L=seq_len,
             multi_hop=multi_hop,
             prefer_stream=False,
+            model_id=mid,
         )
         n_hat = n_entities
     else:
@@ -96,6 +111,7 @@ def prefill_posthoc_adaptive(
             multi_hop=multi_hop,
             prefer_stream=False,
             min_sep=min_sep,
+            model_id=mid,
         )
 
     # Re-compress with policy (re-score inside compress_with_seed_valley)
@@ -123,6 +139,7 @@ def prefill_posthoc_adaptive(
         "L": seq_len,
         "logical_kv_mb_int8": logical_mb,
         "use_int8": use_int8,
+        "model_id": mid,
     }
     return past, logits, info
 
@@ -156,6 +173,7 @@ def prefill_stream_adaptive(
     score_layers: int = 8,
     auto_raise_budget: bool | None = None,
     use_int8: bool = False,
+    model_id: str | None = None,
 ) -> tuple[Any, torch.Tensor, dict]:
     """
     Streaming compress with adaptive stream_budget.
@@ -163,7 +181,9 @@ def prefill_stream_adaptive(
     Without n_entities, uses L-only schedule (n_entities=1) and optionally
     auto_raise_budget mid-stream if peaks look multi-entity.
     Prefer passing n_entities when known (e.g. multi-doc).
+    model_id: optional HF id override for cross-model budget floors.
     """
+    mid = _resolve_model_id(model, model_id)
     seq_len = int(input_ids.shape[-1])
     n_ent = n_entities if n_entities is not None else 1
     pol = policy_for(
@@ -171,6 +191,7 @@ def prefill_stream_adaptive(
         L=seq_len,
         multi_hop=multi_hop,
         prefer_stream=True,
+        model_id=mid,
     )
     # Auto-raise only when n_entities not provided (discovery mode)
     if auto_raise_budget is None:
@@ -201,6 +222,7 @@ def prefill_stream_adaptive(
         "L": seq_len,
         "logical_kv_mb_int8": logical_mb,
         "use_int8": use_int8,
+        "model_id": mid,
     }
     return past, logits, info
 
@@ -218,6 +240,7 @@ def prefill_auto(
     chunk_size: int = 512,
     window_size: int = 128,
     sinks: int = 8,
+    model_id: str | None = None,
 ) -> tuple[Any, torch.Tensor, dict]:
     """
     One-call entrypoint for “fit more context under 24GB”.
@@ -235,7 +258,10 @@ def prefill_auto(
     safe_multi: if True and n_entities is None, use n_entities=3 schedule
     (avoids stream@512 distractor failures on multi-hop / multi-needle).
     use_int8: fake-quant final KV for ~2× logical byte accounting (HF still dequants).
+    model_id: optional HF id; if omitted, taken from model.config for family floors
+    (Gemma-4 stream≥1024 R≥2, Qwen2.5 posthoc≥320, Llama posthoc≥256).
     """
+    mid = _resolve_model_id(model, model_id)
     if safe_multi and n_entities is None:
         n_entities = 3
     if mode == "full":
@@ -245,6 +271,7 @@ def prefill_auto(
             "L": int(input_ids.shape[-1]),
             "cache_tokens": cache_seq_len(past),
             "policy": None,
+            "model_id": mid,
         }
         return past, logits, info
     if mode == "posthoc":
@@ -257,6 +284,7 @@ def prefill_auto(
             multi_hop=multi_hop,
             n_entities=n_entities,
             use_int8=use_int8,
+            model_id=mid,
         )
     if mode == "stream":
         return prefill_stream_adaptive(
@@ -268,5 +296,6 @@ def prefill_auto(
             multi_hop=multi_hop,
             n_entities=n_entities,
             use_int8=use_int8,
+            model_id=mid,
         )
     raise ValueError(f"unknown mode {mode!r}; use stream|posthoc|full")

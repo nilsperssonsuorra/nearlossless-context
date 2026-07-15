@@ -4,11 +4,14 @@ Adaptive R / budget schedule from lab measurements (Qwen3-4B, needle-class).
 Not learned online — a compact policy that matches FINDINGS.md thresholds.
 Use as default knobs for posthoc/stream compress when task class is known
 or estimated (n_entities, L).
+
+Cross-model floors (transfer smoke) are applied via ``model_id`` / family
+calibration so Qwen2.5 / Llama-3.2 / Gemma-4 get safer budgets than primary.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -20,6 +23,95 @@ class AdaptivePolicy:
     stream_budget: int
     mode: str = "valley"
     note: str = ""
+    family: str = "primary"
+
+
+def infer_model_family(model_id: str | None) -> str:
+    """Map HF id / path → calibration family key."""
+    if not model_id:
+        return "primary"
+    m = str(model_id).lower().replace("\\", "/")
+    # Prefer more specific substrings first
+    if "gemma-4" in m or "gemma4" in m or "/gemma-4" in m:
+        return "gemma4"
+    if "qwen2.5" in m or "qwen2_5" in m:
+        return "qwen25"
+    if "llama-3.2" in m or "llama3.2" in m or "llama-3_2" in m:
+        return "llama32"
+    if "qwen3" in m:
+        return "primary"
+    return "primary"
+
+
+def model_id_from_model(model) -> str:
+    """Best-effort HF name from a loaded model."""
+    cfg = getattr(model, "config", None)
+    if cfg is None:
+        return ""
+    for attr in ("_name_or_path", "name_or_path"):
+        v = getattr(cfg, attr, None)
+        if v:
+            return str(v)
+    # Multimodal wrappers sometimes nest text config only — try root
+    return str(getattr(cfg, "model_type", "") or "")
+
+
+def calibrate_policy(
+    pol: AdaptivePolicy,
+    *,
+    model_id: str | None = None,
+    L: int = 4096,
+    prefer_stream: bool = False,
+) -> AdaptivePolicy:
+    """
+    Raise R/budgets to transfer-measured floors for non-primary families.
+
+    Primary (Qwen3-4B) schedule is left unchanged. Floors from FINDINGS transfer:
+      qwen25  — posthoc ≥320; stream ≥768 when L≥8k
+      llama32 — posthoc ≥256; stream@512 ok
+      gemma4  — posthoc@176 ok; stream ≥1024 and R≥2 (single-needle class)
+    """
+    fam = infer_model_family(model_id)
+    if fam == "primary":
+        return replace(pol, family=fam) if pol.family != fam else pol
+
+    R, budget, stream = pol.R, pol.budget, pol.stream_budget
+    extra = f"cal={fam}"
+
+    if fam == "qwen25":
+        budget = max(budget, 320)
+        if L >= 8192:
+            stream = max(stream, 768)
+        extra += " posthoc≥320" + (" stream≥768@8k+" if L >= 8192 else "")
+    elif fam == "llama32":
+        budget = max(budget, 256)
+        extra += " posthoc≥256"
+    elif fam == "gemma4":
+        # Hybrid: posthoc seed_valley@176 works after score-pass fix.
+        # Stream needs more retention + valley radius than primary.
+        if prefer_stream:
+            R = max(R, 2)
+            stream = max(stream, 1024)
+            if L >= 28000:
+                stream = max(stream, 2048)
+            elif L >= 16000:
+                stream = max(stream, 1536)
+            extra += " stream≥1024 R≥2"
+        else:
+            budget = max(budget, 176)
+            extra += " posthoc≥176"
+    else:
+        return replace(pol, family=fam)
+
+    note = f"{pol.note} | {extra}".strip(" |")
+    return AdaptivePolicy(
+        R=R,
+        budget=budget,
+        stream_budget=stream,
+        mode=pol.mode,
+        note=note,
+        family=fam,
+    )
 
 
 def policy_for(
@@ -28,6 +120,7 @@ def policy_for(
     L: int = 4096,
     multi_hop: bool = False,
     prefer_stream: bool = False,
+    model_id: str | None = None,
 ) -> AdaptivePolicy:
     """
     Return R + budgets that empirically hit ε≈0 on our suite.
@@ -35,78 +128,82 @@ def policy_for(
     n_entities: distinct secrets / critical clusters expected
     L: context length (affects stream budget for single-needle long L)
     multi_hop: two+ linked facts for one answer
+    model_id: HF id for cross-model floors (optional; primary if omitted)
     """
     n_entities = max(1, int(n_entities))
     L = int(L)
 
     # Multi-hop (single answer): scorers worked @512 R=1; keep modest slack
     if multi_hop and n_entities <= 2:
-        return AdaptivePolicy(
+        pol = AdaptivePolicy(
             R=1,
             budget=512,
             stream_budget=512,
             note="two-hop Alice→id→password @4k",
         )
-    if multi_hop and n_entities >= 3:
-        return AdaptivePolicy(
+    elif multi_hop and n_entities >= 3:
+        pol = AdaptivePolicy(
             R=8,
             budget=768,
             stream_budget=1024,
             note="3-hop / multi-link: prefer larger R + stream slack",
         )
-
     # Multi-needle recall_all style
-    if n_entities >= 3:
-        return AdaptivePolicy(
+    elif n_entities >= 3:
+        pol = AdaptivePolicy(
             R=8,
             budget=384,
             stream_budget=1024,
             note="3-needle posthoc R=8@384 / stream R=8@1024",
         )
-    if n_entities == 2:
+    elif n_entities == 2:
         # Prefer multi-needle-like R (partial peaks) over tight 2-hop budget
-        return AdaptivePolicy(
+        pol = AdaptivePolicy(
             R=8,
             budget=384,
             stream_budget=1024,
             note="2-entity: use multi-needle R=8 schedule (safer than 2-hop R=1)",
         )
-
     # Single needle: scale stream budget with L
-    if L <= 4096:
-        return AdaptivePolicy(
+    elif L <= 4096:
+        pol = AdaptivePolicy(
             R=1,
             budget=176,
             stream_budget=512 if prefer_stream else 176,
             note="single @4k: posthoc@176 / stream@512",
         )
-    if L <= 8192:
-        return AdaptivePolicy(
+    elif L <= 8192:
+        pol = AdaptivePolicy(
             R=1,
             budget=176,
             stream_budget=512,
             note="single @8k stream@512",
         )
-    if L <= 12288:
-        return AdaptivePolicy(
+    elif L <= 12288:
+        pol = AdaptivePolicy(
             R=1,
             budget=256,
             stream_budget=1024,
             note="single ~12k: raise stream (mid fails @512)",
         )
-    if L <= 24576:
-        return AdaptivePolicy(
+    elif L <= 24576:
+        pol = AdaptivePolicy(
             R=1,
             budget=256,
             stream_budget=1536,
             note="single @16k–24k stream@1536 (reliable)",
         )
-    # ≥28k: mid-depth can flake at 1536 → use 2048
-    return AdaptivePolicy(
-        R=1,
-        budget=320,
-        stream_budget=2048,
-        note="single ≥28k stream@2048 (stabilizes mid flake at 28k)",
+    else:
+        # ≥28k: mid-depth can flake at 1536 → use 2048
+        pol = AdaptivePolicy(
+            R=1,
+            budget=320,
+            stream_budget=2048,
+            note="single ≥28k stream@2048 (stabilizes mid flake at 28k)",
+        )
+
+    return calibrate_policy(
+        pol, model_id=model_id, L=L, prefer_stream=prefer_stream
     )
 
 
@@ -203,6 +300,7 @@ def policy_from_scores(
     multi_hop: bool = False,
     prefer_stream: bool = False,
     min_sep: int = 200,
+    model_id: str | None = None,
 ) -> tuple[AdaptivePolicy, int]:
     """Estimate n_entities from scores then return (policy, n_hat)."""
     n_hat = estimate_n_entities_from_scores(
@@ -215,5 +313,6 @@ def policy_from_scores(
         L=L,
         multi_hop=multi_hop,
         prefer_stream=prefer_stream,
+        model_id=model_id,
     )
     return pol, n_hat

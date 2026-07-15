@@ -11,7 +11,7 @@ from decode_utils import greedy_generate
 
 # Long single-document retrieval (default streaming)
 past, logits, info = prefill_auto(model, input_ids, mode="stream")
-# info["policy"] has R, stream_budget
+# info["policy"] has R, stream_budget, family (auto from model.config)
 
 # Multi-secret / multi-doc: pass entity count (or safe_multi)
 past, logits, info = prefill_auto(
@@ -28,12 +28,17 @@ past, logits, info = prefill_auto(model, input_ids, mode="posthoc")
 # Full KV gold (chunked prefill)
 past, logits, info = prefill_auto(model, input_ids, mode="full")
 
+# Optional model_id override for family floors (usually auto-detected):
+# prefill_auto(model, input_ids, mode="stream", model_id="google/gemma-4-E4B-it")
+
 toks = greedy_generate(
     model, past, logits, max_new,
     eos_id=tokenizer.eos_token_id,
     next_position=input_ids.shape[-1],  # critical after compress
 )
 ```
+
+**Family floors** (transfer-measured): Gemma-4 stream ≥1024 R≥2; Qwen2.5 posthoc ≥320 / stream ≥768 @8k+; Llama-3.2 posthoc ≥256.
 
 ## Practical length guide (single-needle, measured)
 

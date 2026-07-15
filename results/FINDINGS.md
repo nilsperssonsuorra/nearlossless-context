@@ -271,6 +271,19 @@ Model: `google/gemma-4-E4B-it` — **hybrid** sliding-window (W=512, ~5:1) + ful
 - Stream needs **more** than Qwen/Llama defaults: **1024 + R=2** (or 1536 + R=1) @4k mid.  
 - Sliding stack is a free local window; long-range budget is the full-attn layers only.
 
+### Per-model adaptive calibration (2026-07-16)
+
+`adaptive.policy_for(..., model_id=)` + `prefill_auto` (reads `model.config._name_or_path`):
+
+| Family | Detection | Single posthoc floor | Single stream @4k |
+|--------|-----------|----------------------|-------------------|
+| primary (Qwen3-4B) | `qwen3` / default | 176 | 512 R=1 |
+| qwen25 | `qwen2.5` | **320** | 512; **768** if L≥8k |
+| llama32 | `llama-3.2` | **256** | 512 |
+| gemma4 | `gemma-4` | 176 | **1024 R≥2** |
+
+Gemma smoke: `prefill_auto(mode="stream"|"posthoc")` mid@4k → **both ok** under auto floors.
+
 ### Stream-time auto-raise + long-L policy (2026-07-15 evening)
 
 | Change | Result |

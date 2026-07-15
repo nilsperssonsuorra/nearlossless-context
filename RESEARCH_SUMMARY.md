@@ -61,8 +61,16 @@ See `USAGE.md` and `results/FINDINGS.md`.
 | Llama-3.2-3B | holds | **@512 4k+8k ok** | ~**256** |
 | Gemma-4 E4B (hybrid) | holds (full layers) | **@1024 R=2** (not 512) | ~**176** (after hybrid score-pass fix) |
 
+## Adaptive policy (per-model)
+
+`prefill_auto` applies transfer floors from `model.config` (override with `model_id=`):
+
+- **Gemma-4** stream → R≥2, budget ≥1024  
+- **Qwen2.5** posthoc ≥320; stream ≥768 @ L≥8k  
+- **Llama-3.2** posthoc ≥256  
+
 ## Next
 
 1. Residual scorer tax → oracle (primary)  
-2. Per-model calibration in adaptive policy (incl. Gemma stream floor)  
-3. Public note / blog with tables above  
+2. Public note / blog with tables above  
+3. Optional: true int8 kernels / multi-seed transfer variance  

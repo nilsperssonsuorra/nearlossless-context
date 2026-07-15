@@ -30,7 +30,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from adaptive import policy_for  # noqa: E402
+from adaptive import estimate_n_entities_from_scores, policy_for  # noqa: E402
 from bench_h3_hop3 import build_prompt as build_hop3  # noqa: E402
 from bench_h3_hop3 import score_answer as score_hop3  # noqa: E402
 from bench_h3_multi import NEEDLES, build_multi_prompt, score_multi  # noqa: E402
@@ -40,7 +40,6 @@ from compress_adaptive import (  # noqa: E402
     prefill_stream_adaptive,
     score_prefix_from_past,
 )
-from adaptive import estimate_n_entities_from_scores  # noqa: E402
 from config import PRIMARY_MODEL_ID, RESULTS_DIR  # noqa: E402
 from decode_utils import greedy_generate  # noqa: E402
 from snapkv import cache_nbytes, cache_seq_len, prefill_chunked  # noqa: E402
