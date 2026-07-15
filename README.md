@@ -71,6 +71,10 @@ pip install -r requirements.txt
 | `experiments/bench_streaming.py` | Online vs posthoc compress (peak cache / VRAM) |
 | `experiments/bench_h3_multi.py` | **H3** multi-needle (2–3 secrets) kill + scorers |
 | `experiments/bench_h3_hop.py` | Two-fact multi-hop smoke (Alice→id→password) |
+| `experiments/bench_h3_hop3.py` | 3-hop + distractors + adaptive policy arms |
+| `experiments/adaptive.py` | Measured R/budget schedule + peak n̂ |
+| `experiments/compress_adaptive.py` | End-to-end posthoc/stream/`prefill_auto` |
+| `experiments/bench_adaptive_e2e.py` | Adaptive E2E across single/multi/hop3 |
 | `experiments/scorer_valley.py` | seed_valley + streaming prefill helpers |
 | `experiments/bench_ceiling.py` | Dense full-KV ceiling: VRAM / speed / needle vs \(L\) |
 | `experiments/bench_context_tax.py` | Decode/VRAM tax vs length |
@@ -90,9 +94,11 @@ python experiments\bench_l_epsilon.py --lengths 4096,6144,8192 --allow-long --mi
 python experiments\bench_streaming.py --lengths 4096,8192 --allow-long --budget 176 --stream-hi 512
 python experiments\bench_h3_multi.py --ctx 4096 --n-needles 3 --budget 1536 --stream-budget 2048
 python experiments\bench_h3_hop.py --ctx 4096 --budget 512
+python experiments\bench_h3_hop3.py --ctx 4096
+python experiments\bench_adaptive_e2e.py --ctx 4096
 ```
 
-Latest: stream \(L_\varepsilon\ge16\mathrm{k}\); multi-needle posthoc **R=8@384** / stream **R=8@1024**; two-hop **HOP_SUPPORTED** (oracle@~167).
+Latest: stream single-needle **\(L_\varepsilon\ge24\mathrm{k}\)** @1536 (~9 GB peak); **prefill_auto**; adaptive posthoc_auto ok.
 
 ### Ceiling map
 
@@ -121,12 +127,13 @@ Outputs: `results/*.csv` + `*.json` (gitignored). Narrative: `results/FINDINGS.m
 - **H2:** at fixed bytes, priority (crit±R\*) beats equal/2× volume without critical spans  
 - **Scorer:** **seed_valley@176** ε=0; beats SnapKV@192 at 4k; oracle@**~155**  
 - **L_ε (mid):** full and posthoc@176 reach **8k**; decode KV **~27 MB vs ~1.1 GB**  
-- **Streaming:** @512 → \(L_\varepsilon=8\mathrm{k}\); **@1536 → \(L_\varepsilon\ge16\mathrm{k}\)** (peak cache ~2k, ~9 GB VRAM)  
+- **Streaming:** @512 → 8k; **@1536 → \(\ge24\mathrm{k}\)** single-needle (peak cache ~2k, ~9 GB)  
 - **H3 multi-needle:** posthoc **R=8@384**; stream **R=8@1024** (vs R=1@2048)  
-- **Two-hop:** oracle + scorers @512 work; anti-oracle fails  
+- **Two-hop / 3-hop+distractors:** critical spans hold; **stream@512 can pick distractors**  
+- **Adaptive E2E:** posthoc auto ok; stream needs entity prior; peak n̂ after sink-mask  
 - Chunked prefill makes long context interactive on WDDM  
 
-**Next (goal-aligned):** adaptive R/budget; harder multi-hop; residual tax to oracle.
+**Next (goal-aligned):** stream-time n̂; residual tax; int8 / second model / writeup.
 
 ---
 

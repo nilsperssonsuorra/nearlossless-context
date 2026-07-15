@@ -180,6 +180,45 @@ Link: Alice → E-4412 → maple-quartz-19 (facts at ~0.3 / ~0.7 depth).
 - Scorers handle this easier than 3-way recall_all (one password target).  
 - Necessity holds: drop critical spans → wrong answer.
 
+### 3-hop + distractors (`h3_hop3_20260715T121607Z`)
+
+Alice → Dept-7 → officer E-4412 → maple-quartz-19, with Bob/Carol wrong chains (pine-nebula-88, oak-cipher-42).
+
+| Arm | Success | Notes |
+|-----|---------|--------|
+| full | **yes** | |
+| oracle_r1 | **yes** @~215 tok | |
+| anti_oracle | **no** | necessity |
+| recent | no | |
+| posthoc R=1@512 / R=8@384 / adaptive | **yes** | |
+| stream R=1@512 | **no** | answered **oak-cipher-42** (distractor) |
+| stream R=8@1024 / adaptive | **yes** | |
+
+**VERDICT: `HOP3_SUPPORTED`**
+
+- Critical-span retention still necessary+sufficient with **3 links + distractors**.  
+- Streaming at single-needle budgets (**512, R=1**) is **unsafe** under distractors (picks wrong chain).  
+- Adaptive policy (R=8, stream 1024) from `adaptive.py` passes.
+
+### Adaptive policy (`experiments/adaptive.py` + `compress_adaptive.py`)
+
+Lab schedule maps (n_entities, L, multi_hop) → (R, budget, stream_budget).
+
+**E2E** (`adaptive_e2e_20260715T122630Z`):
+
+| Task | posthoc true-n | posthoc **auto** (peak n̂) | stream true-n | stream L-only |
+|------|----------------|---------------------------|---------------|---------------|
+| single mid | PASS @176 | PASS (n̂=2 → looser 384) | PASS | PASS |
+| multi3 recall_all | PASS | **PASS** (n̂=2 → R=8@384) | PASS | FAIL |
+| hop3+distractors | PASS | PASS | PASS | FAIL (distractor) |
+
+**VERDICT: `ADAPTIVE_E2E_OK`**
+
+- Peak estimate must **ignore sink mass** (else n̂ stuck at 1).  
+- Auto n̂ often 2 not 3, but R=8@384 schedule still recovers 3 needles.  
+- Stream still needs **entity hint or conservative multi budget** — L-only fails multi/hop3.  
+- True n_entities remains best; auto is usable for **posthoc**.
+
 ---
 
 ## Streaming prefill compress (`streaming_20260714T223948Z` + sweeps)
@@ -229,6 +268,24 @@ All depths {0, 0.5, 1.0}; peak cache ≈ budget + chunk (512).
 - Streaming reaches **16k** quality with peak cache **~2k** (~**8×** below full @16k) and VRAM **~9.1 GB** vs full **~11.0 GB**.  
 - Mid-depth is the hard depth as L grows: need **higher stream budget** (512→1536 from 8k→16k), not more recent-only.  
 - Full still fits 16k on 3090 with chunked prefill, but pays **~2.3 GB** decode KV vs **~0.22 GB** stream@1536 (~**10×**).
+
+### Practical max-L ceiling (stream, single-needle, all depths)
+
+Extended probe 2026-07-15 (stream valley R=1):
+
+| L | stream@1536 | peak cache | peak VRAM |
+|---|-------------|------------|-----------|
+| 16k | **PASS 3/3** | ~2048 | ~9.1 GB |
+| **20k** | **PASS 3/3** | ~2048 | ~9.1 GB |
+| **24k** | **PASS 3/3** | ~2048 | ~9.1 GB |
+
+Also PASS at B=2048 / 2560 (higher peak, not needed for quality).
+
+**\(L_\varepsilon(\mathrm{stream@1536}) \ge 24576\)** on single-needle (not yet failed).
+
+vs workstation “before”: **~4k comfortable full / 8k lag** → **~24k** near-lossless needle with stream (**~6×** length), peak VRAM flat ~9 GB.
+
+API: `compress_adaptive.prefill_auto(model, ids, mode="stream")`.
 
 ---
 
@@ -329,16 +386,16 @@ Previous Ada path padded per-head lists to `max_k`, so effective length was ~200
 
 **Systems:**  
 - **Posthoc** seed_valley@176: ~**42×** decode KV @8k mid (full peak).  
-- **Streaming @512:** \(L_\varepsilon=8\mathrm{k}\) all depths; peak cache ~1k.  
-- **Streaming @1536:** \(L_\varepsilon \ge 16\mathrm{k}\) all depths; peak cache ~2k, decode ~216 MB vs full ~2.3 GB.  
+- **Streaming @512 / @1536:** \(L_\varepsilon=8\mathrm{k}\) / **\(\ge24\mathrm{k}\)** single-needle (peak ~2k, ~9 GB).  
+- **Adaptive posthoc** (sink-masked peak n̂ + schedule): passes single / multi3 / hop3. Stream needs n prior.  
+- **`prefill_auto`**: one-call stream/posthoc/full entrypoint.  
 
-Not yet: multi-model transfer, online@176, multi-needle all the way to oracle budgets, harder multi-hop chains.
+Not yet: multi-model transfer, online@176, multi-needle at true oracle keep size, stream auto without n hint.
 
 ---
 
 ## Next (optional)
 
-1. Adaptive **R and budget** vs #entities / L  
-2. Harder multi-hop (3+ hops, distractors)  
-3. Close residual scorer tax to oracle  
-4. int8 decode; second model
+1. Stream-time entity estimate (without full past)  
+2. Residual tax to oracle; int8 decode; second model  
+3. Public writeup of H1–H3 + adaptive schedule
