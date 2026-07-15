@@ -10,6 +10,11 @@ RESULTS_DIR.mkdir(exist_ok=True)
 # NOTE: Qwen/Qwen3.5-4B is hybrid linear+full attention — bad first target for SnapKV/ByteBudgetKV.
 PRIMARY_MODEL_ID = "Qwen/Qwen3-4B-Instruct-2507"
 
+# TRANSFER: second full-attention model (not hybrid) for cross-model smoke.
+TRANSFER_MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"
+# Out-of-family transfer target (full attn).
+OUT_OF_FAMILY_MODEL_ID = "meta-llama/Llama-3.2-3B-Instruct"
+
 # Context lengths for tax / compare curves
 # Cap at 4k on this workstation — 8k+ pegs the 3090 and freezes the desktop (WDDM).
 DEFAULT_CTX_LENGTHS = [2048, 4096]

@@ -219,6 +219,30 @@ Lab schedule maps (n_entities, L, multi_hop) → (R, budget, stream_budget).
 - Stream still needs **entity hint or conservative multi budget** — L-only fails multi/hop3.  
 - True n_entities remains best; auto is usable for **posthoc**.
 
+## Transfer smoke
+
+### Same family: Qwen2.5-3B (`transfer_20260715T214430Z` + retune)
+
+| Arm @4k mid | Result |
+|-------------|--------|
+| full / oracle_r1 / anti | **ok / ok / fail** (H1) |
+| stream@512 | **ok** @4k; **needs 768** @8k |
+| posthoc | **@320** (not 176) |
+
+### Out-of-family: Llama-3.2-3B-Instruct (`transfer_20260715T215958Z` + retune)
+
+| Arm | Result |
+|-----|--------|
+| full / oracle_r1 / anti | **ok / ok / fail** (H1) |
+| stream@512 | **ok @4k and @8k** |
+| posthoc@176 | fail → **ok @256** |
+
+**VERDICT: `TRANSFER_OK` (mechanism); budgets are model-specific**
+
+- H1 critical±R\* **transfers across Qwen3-4B, Qwen2.5-3B, and Llama-3.2-3B**.  
+- Streaming@512 is robust on Llama (even 8k); Qwen2.5 needs more @8k.  
+- Posthoc scorer tax: primary ~176, Llama ~256, Qwen2.5 ~320.
+
 ### Stream-time auto-raise + long-L policy (2026-07-15 evening)
 
 | Change | Result |
@@ -398,12 +422,12 @@ Previous Ada path padded per-head lists to `max_k`, so effective length was ~200
 - **Streaming @1536:** reliable **~24k**, observed **≥40k** single-needle (peak ~2k, ~9 GB; 28k mid noisy).  
 - **Adaptive posthoc** + **`prefill_auto`** (`safe_multi` for multi-secret stream).  
 
-Not yet: multi-model transfer, online@176, multi-needle at true oracle keep size, true int8 kernels (not fake-quant).
+Not yet: multi-needle at oracle keep size on all models, true int8 kernels, multi-hop transfer suite.
 
 ---
 
 ## Next (optional)
 
-1. Residual scorer tax → oracle keep size  
-2. True int8 attention / second model family  
-3. Public writeup (`RESEARCH_SUMMARY.md` draft)
+1. Residual scorer tax → oracle (primary + Llama)  
+2. Per-model adaptive calibration table  
+3. Public writeup

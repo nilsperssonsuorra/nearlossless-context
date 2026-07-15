@@ -49,12 +49,19 @@ See `USAGE.md` and `results/FINDINGS.md`.
 
 ## What this is / isn’t
 
-**Is:** measured mechanism + systems path on one modern 4B model; portfolio-grade research engineering.  
-**Isn’t:** general long-context SOTA, multi-model transfer, true int8 kernels, or oracle-tight scorers on all tasks.
+**Is:** measured mechanism + systems on primary 4B; **H1 transfers** to Qwen2.5-3B **and Llama-3.2-3B**.  
+**Isn’t:** general long-context SOTA, true int8 kernels, oracle-tight scorers on all models/tasks.
+
+## Transfer
+
+| Model | H1 | stream@512 | posthoc min (4k mid) |
+|-------|----|------------|----------------------|
+| Qwen3-4B (primary) | holds | 4k ok; long L uses 512–2048 | ~176 |
+| Qwen2.5-3B | holds | 4k ok; 8k needs **768** | ~**320** |
+| Llama-3.2-3B | holds | **4k+8k ok** | ~**256** |
 
 ## Next
 
-1. Harden stream-time n̂ (already: auto_raise_budget before first drop)  
-2. Residual scorer tax → oracle keep size  
-3. Second model family; optional true int8 attention  
-4. Public note / blog with tables above  
+1. Residual scorer tax → oracle  
+2. Per-model calibration in adaptive policy  
+3. Public note / blog with tables above  

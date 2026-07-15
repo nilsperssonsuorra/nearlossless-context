@@ -75,6 +75,7 @@ pip install -r requirements.txt
 | `experiments/adaptive.py` | Measured R/budget schedule + peak n̂ |
 | `experiments/compress_adaptive.py` | End-to-end posthoc/stream/`prefill_auto` |
 | `experiments/bench_adaptive_e2e.py` | Adaptive E2E across single/multi/hop3 |
+| `experiments/bench_transfer.py` | Second-model H1 + stream transfer smoke |
 | `experiments/scorer_valley.py` | seed_valley + streaming prefill helpers |
 | `experiments/bench_ceiling.py` | Dense full-KV ceiling: VRAM / speed / needle vs \(L\) |
 | `experiments/bench_context_tax.py` | Decode/VRAM tax vs length |
@@ -96,9 +97,11 @@ python experiments\bench_h3_multi.py --ctx 4096 --n-needles 3 --budget 1536 --st
 python experiments\bench_h3_hop.py --ctx 4096 --budget 512
 python experiments\bench_h3_hop3.py --ctx 4096
 python experiments\bench_adaptive_e2e.py --ctx 4096
+python experiments\bench_transfer.py --also-8k
+python experiments\bench_transfer.py --model meta-llama/Llama-3.2-3B-Instruct --also-8k
 ```
 
-Latest: stream **≥40k** single-needle; auto-raise multi stream; L≥28k→2048; `RESEARCH_SUMMARY.md` + int8 option.
+Latest: stream **≥40k** primary; **H1 on Llama-3.2-3B + Qwen2.5-3B** (stream@512 ok on Llama 4k/8k; posthoc ~256–320).
 
 ### Ceiling map
 
