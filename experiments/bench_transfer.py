@@ -260,6 +260,11 @@ def main() -> None:
     elif full and ora and anti is False and (st or ph):
         verdict = "TRANSFER_PARTIAL"
         reasons = ["H1 holds; some scorer arms fail — tune budget/R for this model"]
+    elif full and ora and anti is False and not st and not ph:
+        verdict = "TRANSFER_H1_OK_SCORER_FAIL"
+        reasons = [
+            "H1 (oracle±R / anti) holds; attention scorer stream+posthoc fail at default budgets"
+        ]
     elif full and (not ora or anti):
         verdict = "TRANSFER_H1_WEAK"
         reasons = ["suite or critical-span story weaker on this model"]

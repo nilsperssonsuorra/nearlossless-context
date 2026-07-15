@@ -14,6 +14,8 @@ PRIMARY_MODEL_ID = "Qwen/Qwen3-4B-Instruct-2507"
 TRANSFER_MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"
 # Out-of-family transfer target (full attn).
 OUT_OF_FAMILY_MODEL_ID = "meta-llama/Llama-3.2-3B-Instruct"
+# Hybrid sliding+full (Gemma 4 E4B ~4B effective). Requires hybrid-safe KV compress.
+GEMMA4_E4B_MODEL_ID = "google/gemma-4-E4B-it"
 
 # Context lengths for tax / compare curves
 # Cap at 4k on this workstation — 8k+ pegs the 3090 and freezes the desktop (WDDM).

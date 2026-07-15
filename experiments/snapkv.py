@@ -28,17 +28,45 @@ def is_dynamic_cache(past: Any) -> bool:
     return past is not None and hasattr(past, "layers")
 
 
+def is_sliding_layer(layer: Any) -> bool:
+    return bool(getattr(layer, "is_sliding", False))
+
+
+def is_hybrid_cache(past: Any) -> bool:
+    """True if any layer is a sliding-window cache (Gemma-4 hybrid, etc.)."""
+    if not is_dynamic_cache(past) or not past.layers:
+        return False
+    return any(is_sliding_layer(layer) for layer in past.layers)
+
+
 def cache_seq_len(past: Any) -> int:
+    """
+    Compressible KV length for bookkeeping.
+
+    On hybrid caches (sliding + full), return the full-attention layer length —
+    that is what oracle/scorer compress. Sliding layers already self-cap.
+    """
     if past is None:
         return 0
+    if is_dynamic_cache(past) and past.layers:
+        full_lens: list[int] = []
+        any_lens: list[int] = []
+        for layer in past.layers:
+            if layer.keys is None:
+                continue
+            s = int(layer.keys.shape[-2])
+            any_lens.append(s)
+            if not is_sliding_layer(layer):
+                full_lens.append(s)
+        if full_lens:
+            return max(full_lens)
+        if any_lens:
+            return max(any_lens)
     if hasattr(past, "get_seq_length"):
         try:
             return int(past.get_seq_length())
         except Exception:
             pass
-    if is_dynamic_cache(past) and past.layers:
-        k = past.layers[0].keys
-        return 0 if k is None else int(k.shape[-2])
     return 0
 
 
@@ -52,6 +80,19 @@ def cache_nbytes(past: Any) -> int:
         if layer.values is not None:
             n += layer.values.numel() * layer.values.element_size()
     return n
+
+
+def full_layer_h_kv(past: Any) -> int:
+    """num_key_value_heads for a full-attention cache layer (fallback: first layer)."""
+    if not is_dynamic_cache(past) or not past.layers:
+        raise ValueError("empty cache")
+    for layer in past.layers:
+        if layer.keys is not None and not is_sliding_layer(layer):
+            return int(layer.keys.shape[1])
+    for layer in past.layers:
+        if layer.keys is not None:
+            return int(layer.keys.shape[1])
+    raise ValueError("no key layers")
 
 
 @torch.inference_mode()
@@ -102,11 +143,16 @@ def prefill_chunked(
 
 
 def compress_recent(past: Any, max_capacity: int) -> Any:
-    """Keep only the last max_capacity tokens (local window baseline). Mutates cache."""
+    """Keep only the last max_capacity tokens (local window baseline). Mutates cache.
+
+    Sliding-window layers are left intact (already local; mask uses cumulative_length).
+    """
     if not is_dynamic_cache(past):
         raise TypeError(f"Unsupported past_key_values type: {type(past)}")
     for layer in past.layers:
         if layer.keys is None:
+            continue
+        if is_sliding_layer(layer):
             continue
         s = layer.keys.shape[-2]
         if s > max_capacity:
@@ -125,6 +171,8 @@ def cache_drop_last(past: Any) -> Any:
         if layer.keys.shape[-2] > 1:
             layer.keys = layer.keys[:, :, :-1, :].contiguous()
             layer.values = layer.values[:, :, :-1, :].contiguous()
+            if is_sliding_layer(layer) and hasattr(layer, "cumulative_length"):
+                layer.cumulative_length = max(int(layer.cumulative_length) - 1, 0)
     return past
 
 
@@ -160,6 +208,9 @@ def compress_kv_snapkv(
         k = layer.keys
         v = layer.values
         if k is None:
+            continue
+        # Hybrid sliding layers already windowed — leave mask/cumulative intact.
+        if is_sliding_layer(layer):
             continue
         bsz, h_kv, seqlen, head_dim = k.shape
         if seqlen != S:
@@ -212,26 +263,64 @@ def compress_kv_snapkv(
 
 
 def clone_dynamic_cache(past: Any) -> Any:
-    """Deep-copy DynamicCache keys/values into a new DynamicCache."""
+    """Deep-copy DynamicCache keys/values, preserving hybrid sliding layers."""
     if not is_dynamic_cache(past):
         raise TypeError(type(past))
-    from transformers import DynamicCache
+    from transformers.cache_utils import Cache, DynamicCache, DynamicLayer, DynamicSlidingWindowLayer
 
-    new = DynamicCache()
-    for i, layer in enumerate(past.layers):
-        if layer.keys is None:
-            continue
-        new.update(layer.keys.clone(), layer.values.clone(), i)
+    if not is_hybrid_cache(past):
+        new = DynamicCache()
+        for i, layer in enumerate(past.layers):
+            if layer.keys is None:
+                continue
+            new.update(layer.keys.clone(), layer.values.clone(), i)
+        return new
+
+    layers = []
+    for layer in past.layers:
+        if is_sliding_layer(layer):
+            nl = DynamicSlidingWindowLayer(sliding_window=int(layer.sliding_window))
+        else:
+            nl = DynamicLayer()
+        if layer.keys is not None:
+            nl.lazy_initialization(layer.keys, layer.values)
+            nl.keys = layer.keys.clone()
+            nl.values = layer.values.clone()
+            if hasattr(layer, "cumulative_length"):
+                nl.cumulative_length = int(layer.cumulative_length)
+        layers.append(nl)
+    new = DynamicCache.__new__(DynamicCache)
+    Cache.__init__(new, layers=layers)
     return new
 
 
 def crop_cache_prefix(past: Any, prefix_len: int) -> Any:
-    """Keep only first prefix_len positions (mutates)."""
+    """
+    Keep only first prefix_len positions on full layers (mutates).
+
+    For hybrid sliding layers (score-pass helper): drop the trailing
+    (S_local - keep_n) tokens so a subsequent obs-window forward can append
+    without double-counting the observation region. Sets cumulative_length to
+    the remaining key length so mask sizes match actual K/V.
+    """
+    full_S = cache_seq_len(past)
+    drop_tail = max(full_S - int(prefix_len), 0)
     for layer in past.layers:
         if layer.keys is None:
             continue
-        layer.keys = layer.keys[:, :, :prefix_len, :].contiguous()
-        layer.values = layer.values[:, :, :prefix_len, :].contiguous()
+        if is_sliding_layer(layer):
+            s = int(layer.keys.shape[-2])
+            keep_n = max(s - drop_tail, 0)
+            if keep_n <= 0:
+                # Minimal 1-token stub so layer stays initialized.
+                keep_n = 1
+            layer.keys = layer.keys[:, :, :keep_n, :].contiguous()
+            layer.values = layer.values[:, :, :keep_n, :].contiguous()
+            layer.cumulative_length = keep_n
+            continue
+        pl = min(int(prefix_len), int(layer.keys.shape[-2]))
+        layer.keys = layer.keys[:, :, :pl, :].contiguous()
+        layer.values = layer.values[:, :, :pl, :].contiguous()
     return past
 
 

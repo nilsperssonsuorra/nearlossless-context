@@ -164,16 +164,43 @@ def build_index_set(
 
 
 def compress_keep_indices(past, keep: list[int]):
-    """Keep only listed positions (sorted) in every layer. Mutates DynamicCache."""
+    """
+    Keep only listed positions (sorted) in full-attention layers. Mutates cache.
+
+    Hybrid models (e.g. Gemma-4): sliding-window layers already hold a local
+    window and their attention masks depend on cumulative_length — do not
+    index_select them. Long-range fact retention lives in full layers.
+    """
+    from snapkv import is_sliding_layer  # local import avoids cycles
+
     if not is_dynamic_cache(past):
         raise TypeError(type(past))
     if not keep:
         raise ValueError("empty keep set")
-    idx = torch.tensor(keep, device=past.layers[0].keys.device, dtype=torch.long)
+    device = None
+    for layer in past.layers:
+        if layer.keys is not None:
+            device = layer.keys.device
+            break
+    if device is None:
+        raise ValueError("empty cache")
+    keep_t = torch.tensor(sorted(set(int(i) for i in keep)), device=device, dtype=torch.long)
     for layer in past.layers:
         if layer.keys is None:
             continue
-        # keys: [B,H,S,D]
+        if is_sliding_layer(layer):
+            continue
+        s = int(layer.keys.shape[-2])
+        # Guard: keep indices must be in [0, S)
+        if int(keep_t.max()) >= s or int(keep_t.min()) < 0:
+            valid = keep_t[(keep_t >= 0) & (keep_t < s)]
+            if valid.numel() == 0:
+                # Fall back to recent tail
+                n = min(len(keep), s)
+                valid = torch.arange(s - n, s, device=device, dtype=torch.long)
+            idx = valid
+        else:
+            idx = keep_t
         layer.keys = layer.keys.index_select(2, idx).contiguous()
         layer.values = layer.values.index_select(2, idx).contiguous()
     return past

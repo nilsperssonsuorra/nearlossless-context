@@ -243,6 +243,31 @@ Lab schedule maps (n_entities, L, multi_hop) → (R, budget, stream_budget).
 - Streaming@512 is robust on Llama (even 8k); Qwen2.5 needs more @8k.  
 - Posthoc scorer tax: primary ~176, Llama ~256, Qwen2.5 ~320.
 
+### Hybrid out-of-family: Gemma-4 E4B-it (`transfer_20260715T223926Z` + debug)
+
+Model: `google/gemma-4-E4B-it` — **hybrid** sliding-window (W=512, ~5:1) + full-attention layers; shared-KV tail. Not a pure full-attn target.
+
+| Arm @4k mid | Result |
+|-------------|--------|
+| full | **ok** (suite valid) |
+| oracle_r1 (crit±1 on **full layers only**) | **ok**, recall=1.0, ~175 full-KV tokens |
+| anti_oracle | **fail**, recall=0.0 (H1 necessity) |
+| stream@512 / 768 / 1024 | **fail** (512: partial `BLUE-ORBIT` only) |
+| posthoc seed_valley @176–512 | **fail**, recall=0.0 |
+
+**Infrastructure fix (required for any hybrid compress):**
+- `compress_keep_indices` / SnapKV compress **skip sliding layers** (already windowed; masks use `cumulative_length`).
+- `clone_dynamic_cache` / `crop_cache_prefix` preserve `DynamicSlidingWindowLayer`.
+- `cache_seq_len` reports **full-layer** length (compressible store).
+
+**Why scorer fails:** eager score-pass attentions on full layers only put mass on indices **0…510** (nnz=511 = sliding window), never mid-context critical (~2000). Sink collapse — seed_valley cannot recover the needle. Oracle still proves H1 on full-layer KV.
+
+**VERDICT: `TRANSFER_H1_OK_SCORER_FAIL` (hybrid)**
+
+- H1 critical±R\* **transfers to Gemma-4 full layers**.  
+- Classic attention scorer / stream path **does not** transfer without a hybrid-aware score signal (non-attn or fixed score-pass mask).  
+- Sliding layers are a free local window; long-range budget is the full-attn stack only.
+
 ### Stream-time auto-raise + long-L policy (2026-07-15 evening)
 
 | Change | Result |

@@ -75,22 +75,52 @@ def aggregate_prefix_vote(
     score_layers: int = 8,
     kernel_size: int = 7,
 ) -> torch.Tensor:
-    usable = [a for a in attns if a is not None]
+    """
+    Aggregate obs-window attention into a prefix score vector [prefix_len].
+
+    Hybrid models emit sliding + full attentions with different kv_len; only
+    scores with kv_len == prefix_len + window_size (full-attention path) are used.
+    """
+    target_kv = int(prefix_len) + int(window_size)
+    usable = [
+        a
+        for a in attns
+        if a is not None and int(a.shape[-1]) == target_kv
+    ]
+    if not usable:
+        # Fallback: any attn whose kv covers at least the prefix
+        usable = [
+            a
+            for a in attns
+            if a is not None and int(a.shape[-1]) >= int(prefix_len)
+        ]
     if not usable:
         raise RuntimeError("no attentions")
     if score_layers > 0:
         usable = usable[-score_layers:]
     votes = []
     for attn in usable:
+        kv_len = int(attn.shape[-1])
+        # If kv_len matches full path, standard vote; else vote over available prefix slice
+        pl = min(int(prefix_len), kv_len)
         v = attention_to_vote(
             attn,
             h_kv=h_kv,
-            prefix_len=prefix_len,
-            window_size=window_size,
+            prefix_len=pl,
+            window_size=min(int(window_size), max(kv_len - pl, 0)),
             kernel_size=kernel_size,
             query_power=2.0,
             use_max=False,
         )
+        if pl < int(prefix_len):
+            # Pad left so indices align to absolute prefix (early tokens missing)
+            pad = torch.zeros(
+                *v.shape[:-1],
+                int(prefix_len) - pl,
+                device=v.device,
+                dtype=v.dtype,
+            )
+            v = torch.cat([pad, v], dim=-1)
         votes.append(v)
     stacked = torch.stack(votes, dim=0).mean(dim=0)
     return stacked.max(dim=1).values[0]
@@ -484,7 +514,9 @@ def compress_with_seed_valley(
         past = compress_keep_indices(past, keep)
         return past, keep
 
-    h_kv = past.layers[0].keys.shape[1]
+    from snapkv import full_layer_h_kv
+
+    h_kv = full_layer_h_kv(past)
     score = aggregate_prefix_vote(
         attns,
         h_kv=h_kv,
@@ -614,7 +646,9 @@ def compress_past_seed_valley(
         past = compress_keep_indices(past, keep)
         return past, keep
 
-    h_kv = past.layers[0].keys.shape[1]
+    from snapkv import full_layer_h_kv
+
+    h_kv = full_layer_h_kv(past)
     score = aggregate_prefix_vote(
         attns,
         h_kv=h_kv,
