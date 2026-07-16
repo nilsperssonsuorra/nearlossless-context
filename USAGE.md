@@ -49,9 +49,8 @@ toks = greedy_generate(
 | Target L | Recommended | Notes |
 |----------|-------------|--------|
 | ≤ 4k | `stream` + **novelty** (default) | multi-seed ~**93–100%** @512; posthoc @192 |
-| ≤ 32k | `stream` sticky novelty | multi-seed **9/9 @512** peak~**1k** (16/24/32k) |
-| ~40k | `stream` novelty | auto ~**768** (32k solid; 40k unmeasured sticky) |
-| >40k | `stream` | auto ~**1536** slack until measured |
+| ≤ 40k | `stream` sticky novelty | multi-seed **9/9 @512** peak~**1k** (16–40k) |
+| >40k | `stream` | auto ~**768** slack until measured |
 | attn-only stream | `discovery="attn"` | needs **~1536** multi-seed @4k |
 | Multi-secret | `stream` (auto-raise or `safe_multi=True`) | mid-stream peak probe can raise budget |
 

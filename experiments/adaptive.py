@@ -175,29 +175,21 @@ def policy_for(
             stream_budget=512 if prefer_stream else 192,
             note="single @4k: posthoc@192 / stream@512 (discovery=novelty)",
         )
-    elif L <= 32768:
-        # Sticky novelty multi-seed 9/9 @16k/24k/32k stream@512 (FINDINGS).
+    elif L <= 40960:
+        # Sticky novelty multi-seed 9/9 through 40k @ stream@512 (FINDINGS).
         pol = AdaptivePolicy(
             R=1,
             budget=192 if L <= 8192 else 256,
             stream_budget=512 if prefer_stream else (192 if L <= 8192 else 256),
-            note="single ≤32k: stream@512 sticky-novelty multi-seed 9/9 (peak~1k)",
-        )
-    elif L <= 40960:
-        # 40k sticky multi-seed not re-run; keep modest slack
-        pol = AdaptivePolicy(
-            R=1,
-            budget=256,
-            stream_budget=768 if prefer_stream else 256,
-            note="single ~40k: stream@768 (32k sticky@512 solid; 40k unmeasured)",
+            note="single ≤40k: stream@512 sticky-novelty multi-seed 9/9 (peak~1k)",
         )
     else:
-        # Beyond tested sticky multi-seed envelope
+        # Beyond tested sticky multi-seed envelope (40k measured)
         pol = AdaptivePolicy(
             R=1,
             budget=320,
-            stream_budget=1536,
-            note="single >40k: stream@1536 slack until sticky multi-seed measured",
+            stream_budget=768 if prefer_stream else 320,
+            note="single >40k: stream@768 slack until sticky multi-seed measured",
         )
 
     return calibrate_policy(

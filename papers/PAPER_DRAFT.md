@@ -11,7 +11,7 @@
 
 ## Abstract (draft)
 
-Long-context inference is limited by KV cache memory. Training-free token eviction methods reduce cache size, but it is unclear *which* tokens are necessary for near–full-KV quality. On a multi-seed controlled retrieval suite (5×3 cells, Qwen3-4B), we show that **retaining critical fact tokens plus a small local radius** \(R^*=1\) (with sinks and a recent/question window) is necessary and sufficient for ε≈0 quality—**15/15** oracle success, **0/15** anti-oracle—while full KV is **15/15**. A non-oracle attention scorer (`seed_valley`) matches ε=0 at **192** tokens on all cells (~**1.24×** mean oracle size ~149; mean per-cell tax ~**1.16×**). Under online streaming, multi-seed hay exposes a **query-unknown discovery gap**: attention stream@512 is only **33%** at 4k while perfect online pin of critical±R is **15/15** at the same peak budget. A **surface novelty detector** (rarity + digit/ID-like cues, no question) with **sticky pin packing** closes most of that gap (**93%** multi-seed@4k; **100%** sticky multi-seed 3×3 through **32k**) at peak cache **~1k** tokens—where valley often still needs **~2k** or fails. The critical-span mechanism **transfers** across Qwen3, Qwen2.5, Llama-3.2, and hybrid Gemma-4 (full layers). Limitations: needle-class suite; residual scorer tax; novelty aligned with structured secrets; modest multi-seed \(N\).
+Long-context inference is limited by KV cache memory. Training-free token eviction methods reduce cache size, but it is unclear *which* tokens are necessary for near–full-KV quality. On a multi-seed controlled retrieval suite (5×3 cells, Qwen3-4B), we show that **retaining critical fact tokens plus a small local radius** \(R^*=1\) (with sinks and a recent/question window) is necessary and sufficient for ε≈0 quality—**15/15** oracle success, **0/15** anti-oracle—while full KV is **15/15**. A non-oracle attention scorer (`seed_valley`) matches ε=0 at **192** tokens on all cells (~**1.24×** mean oracle size ~149; mean per-cell tax ~**1.16×**). Under online streaming, multi-seed hay exposes a **query-unknown discovery gap**: attention stream@512 is only **33%** at 4k while perfect online pin of critical±R is **15/15** at the same peak budget. A **surface novelty detector** (rarity + digit/ID-like cues, no question) with **sticky pin packing** closes most of that gap (**93%** multi-seed@4k; **100%** sticky multi-seed 3×3 through **40k**) at peak cache **~1k** tokens—where valley often still needs **~2k** or fails. The critical-span mechanism **transfers** across Qwen3, Qwen2.5, Llama-3.2, and hybrid Gemma-4 (full layers). Limitations: needle-class suite; residual scorer tax; novelty aligned with structured secrets; modest multi-seed \(N\).
 
 ---
 
@@ -79,6 +79,7 @@ Posthoc compress still peaks at full prefill KV. **Online** compress after chunk
 | 16k | 33% | **100%** | sticky confirm |
 | 24k | (end-only class) | **100%** (was **67%** non-sticky) | sticky fix |
 | 32k | — | **100%** | sticky; peak~1k |
+| 40k | — | **100%** | sticky multi-seed 9/9 @512 |
 
 Peak cache **~1k** (stream@512) vs **~2k** (stream@1536) or full \(L\). Stress suite (NL / ID-flood / multi-needle) also favors novelty over valley at fixed@512.
 

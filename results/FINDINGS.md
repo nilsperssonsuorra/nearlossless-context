@@ -87,20 +87,20 @@ Query-unknown discovery via rarity + digit/ID-like surface features (no attentio
 
 **VERDICT: `NOVELTY_DETECTOR_OK` (v0)** — closes most of the discovery gap on code needles at stream@512.
 
-### Novelty stress suite (`novelty_stress_20260716T170938Z`)
+### Novelty stress suite (`novelty_stress_20260716T170938Z` + sticky recheck `…T214326Z`)
 
 stream@512, 5 seeds (depths {0,0.5,1} except multi3 mid-only):
 
-| Scenario | valley | **novelty** | oracle_pin |
-|----------|--------|-------------|------------|
-| code (control) | 33% | **100%** | 100% |
-| **nl** (Seraphine / Reykjavik) | 40% | **87%** | 100% |
-| **adv** (ID-like filler flood) | 33% | **100%** | 100% |
-| **multi3** (3 secrets recall_all) | 0% | **80%** | 40%† |
+| Scenario | valley | **novelty** | oracle_pin | Notes |
+|----------|--------|-------------|------------|-------|
+| code (control) | 33% | **100%** | 100% | sticky recheck 15/15 |
+| **nl** (Seraphine / Reykjavik) | 40% | **100%** (was 87% pre-sticky) | 100% | sticky recheck 15/15 |
+| **adv** (ID-like filler flood) | 33% | **100%** | 100% | pre-sticky |
+| **multi3** (3 secrets recall_all) | 0% | **80%** | 40%† | pre-sticky |
 
 † Oracle_pin@512 multi3 can drop a span under packing/order edge cases; novelty still often wins.
 
-**VERDICT: `NOVELTY_STRESS_PASS`** — not code-only: NL facts, adversarial ID filler, and multi-needle improve massively over attn stream.
+**VERDICT: `NOVELTY_STRESS_PASS`** — not code-only: NL facts (sticky **15/15**), adversarial ID filler, and multi-needle improve massively over attn stream.
 
 `prefill_auto(..., mode="stream", discovery="novelty")` is now the default stream path.
 
@@ -122,18 +122,19 @@ Docs: `papers/CAPSULES.md` · `experiments/novelty_detect.py` · `bench_novelty_
 
 **Sticky novelty v1** (`novelty_longL_20260716T210746Z`): sticky pin registry + score-ranked pin packing + max_capsules scales with L.
 
-| L | novelty@512 | novelty@1536 | Peak cache @512 |
-|---|-------------|--------------|-----------------|
-| **16k** | **9/9 (100%)** | 9/9 | ~1024 |
-| **24k** | **9/9 (100%)** | 9/9 | ~1024 |
-| **32k** | **9/9 (100%)** | 9/9 | ~1024 |
+| L | novelty@512 | novelty@1536/768 | Peak cache @512 |
+|---|-------------|------------------|-----------------|
+| **16k** | **9/9 (100%)** | 9/9 @1536 | ~1024 |
+| **24k** | **9/9 (100%)** | 9/9 @1536 | ~1024 |
+| **32k** | **9/9 (100%)** | 9/9 @1536 | ~1024 |
+| **40k** (`…T213723Z`) | **9/9 (100%)** | 9/9 @768 | ~1024 |
 
-**VERDICT: `NOVELTY_LONG_L_WIN` + `STICKY_NOVELTY_FIX`**
+**VERDICT: `NOVELTY_LONG_L_WIN` + `STICKY_NOVELTY_FIX` + `L_EPS_40K_STICKY`**
 
 - Under multi-seed hay, **attn valley@512 does not scale** with L (stays ~33%, end-depth only).  
-- **Surface novelty@512** is multi-seed solid through **32k** once pins are sticky (24k: 6/9 → **9/9**).  
-- **Systems:** multi-seed near-lossless needle through **≥32k** with peak cache **~1k tokens** (~½ prior stream@1536 operating point; ~**8×** below full @32k).  
-- Residual risk: 12k v0 had flakes before sticky; 40k not re-measured multi-seed sticky yet.
+- **Surface novelty@512** is multi-seed solid through **40k** once pins are sticky (24k non-sticky: 6/9 → sticky **9/9**).  
+- **Systems:** multi-seed near-lossless needle through **≥40k** with peak cache **~1k tokens** (~½ prior stream@1536; ~**40×** below full @40k token count).  
+- Matches prior valley fixed-filler “observed max ≥40k @1536” **at ⅓ the stream budget** under multi-seed sticky novelty.
 
 Bench: `experiments/bench_novelty_longL.py` · detector: `novelty_detect.py` (`sticky=True` default).
 
