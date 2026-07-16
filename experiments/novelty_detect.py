@@ -205,12 +205,16 @@ def prefill_streaming_novelty_pin(
     max_capsules: int = 12,
     min_sep: int = 32,
     floor_ratio: float = 0.65,
+    sticky: bool = True,
 ) -> tuple[Any, torch.Tensor, dict]:
     """
     Stream compress forcing keep of *novelty* capsules (query-unknown detector).
 
-    Same retention skeleton as oracle_pin, but discovery = surface novelty on
-    the prefix seen so far (recomputed each compress for stability).
+    Discovery = surface novelty on the prefix so far. Long-L stability:
+      - max_capsules scales with prefix length (more false peaks at large L)
+      - sticky pin registry: once discovered, abs positions stay pinned until
+        evicted (avoids re-rank thrash dropping a previously found secret)
+      - pin packing ranked by novelty score (not cache order) under budget
     """
     from bench_h1_oracle import compress_keep_indices
     from snapkv import cache_seq_len
@@ -227,39 +231,76 @@ def prefill_streaming_novelty_pin(
     abs_pos: list[int] = []
     last_n_novelty = 0
     last_recall_proxy = 0.0
+    sticky_pins: set[int] = set()
+    last_scores: list[float] = []
+    dyn_max_caps = int(max_capsules)
 
-    def _discover_set(end: int) -> set[int]:
+    def _caps_for_len(end: int) -> int:
+        # Grow discovery capacity slowly with L (12 @4k → ~32 @24k → 48 cap)
+        return max(int(max_capsules), min(48, 8 + end // 1024))
+
+    def _discover_set(end: int) -> tuple[set[int], list[float]]:
+        nonlocal dyn_max_caps
         ids_list = input_ids[0, :end].tolist()
-        return novelty_abs_set(
+        scores = score_novelty(tokenizer, ids_list)
+        dyn_max_caps = _caps_for_len(end)
+        fresh = novelty_abs_set(
             tokenizer,
             ids_list,
             expand_radius=expand_radius,
-            max_capsules=max_capsules,
+            max_capsules=dyn_max_caps,
             min_sep=min_sep,
             floor_ratio=floor_ratio,
         )
+        if sticky:
+            sticky_pins.update(fresh)
+            pin = set(sticky_pins)
+        else:
+            pin = set(fresh)
+        return pin, scores
 
-    def _compress(past_kv, abs_list: list[int], budget: int, pin_abs: set[int]):
+    def _compress(
+        past_kv,
+        abs_list: list[int],
+        budget: int,
+        pin_abs: set[int],
+        scores: list[float],
+    ):
         nonlocal last_n_novelty, last_recall_proxy
         S = cache_seq_len(past_kv)
         if S <= budget:
             return past_kv, abs_list
         recent = list(range(max(0, S - window_size), S))
         sink_idx = list(range(min(sinks, S)))
+        # Reserve sinks+recent first so pins cannot starve the question window
         keep: list[int] = []
         seen: set[int] = set()
-        # Priority 1: novelty pins still in cache
-        for i, a in enumerate(abs_list):
-            if a in pin_abs and i not in seen:
-                keep.append(i)
-                seen.add(i)
-        last_n_novelty = len(seen)
-        # Priority 2: sinks + recent
         for i in sink_idx + recent:
-            if i not in seen and 0 <= i < S:
+            if 0 <= i < S and i not in seen:
                 keep.append(i)
                 seen.add(i)
-        # Fill
+        reserve = len(seen)
+        pin_slots = max(0, budget - reserve)
+
+        # Rank pin hits still in cache by novelty score (high first)
+        pin_hits: list[tuple[float, int]] = []
+        for i, a in enumerate(abs_list):
+            if i in seen or a not in pin_abs:
+                continue
+            sc = scores[a] if 0 <= a < len(scores) else 0.0
+            pin_hits.append((sc, i))
+        pin_hits.sort(key=lambda t: (-t[0], t[1]))
+        n_pin_kept = 0
+        for _, i in pin_hits:
+            if n_pin_kept >= pin_slots:
+                break
+            if i not in seen:
+                keep.append(i)
+                seen.add(i)
+                n_pin_kept += 1
+        last_n_novelty = n_pin_kept
+
+        # Fill remainder by cache order
         for i in range(S):
             if len(keep) >= budget:
                 break
@@ -271,6 +312,9 @@ def prefill_streaming_novelty_pin(
         abs_list = [abs_list[i] for i in keep]
         still = sum(1 for a in abs_list if a in pin_abs)
         last_recall_proxy = still / max(len(pin_abs), 1)
+        # Sticky only tracks pins still resident in cache
+        if sticky:
+            sticky_pins.intersection_update(abs_list)
         return past_kv, abs_list
 
     for start in range(0, seq_len, chunk_size):
@@ -301,8 +345,10 @@ def prefill_streaming_novelty_pin(
         peak_cache = max(peak_cache, S_now)
 
         if past is not None and S_now > dyn_budget:
-            pin_abs = _discover_set(end)
-            past, abs_pos = _compress(past, abs_pos, dyn_budget, pin_abs)
+            pin_abs, last_scores = _discover_set(end)
+            past, abs_pos = _compress(
+                past, abs_pos, dyn_budget, pin_abs, last_scores
+            )
             n_compress += 1
             peak_cache = max(peak_cache, cache_seq_len(past))
             if torch.cuda.is_available():
@@ -310,8 +356,10 @@ def prefill_streaming_novelty_pin(
 
     assert past is not None and last_logits is not None
     if cache_seq_len(past) > final_budget:
-        pin_abs = _discover_set(seq_len)
-        past, abs_pos = _compress(past, abs_pos, final_budget, pin_abs)
+        pin_abs, last_scores = _discover_set(seq_len)
+        past, abs_pos = _compress(
+            past, abs_pos, final_budget, pin_abs, last_scores
+        )
         n_compress += 1
 
     stats = {
@@ -324,6 +372,8 @@ def prefill_streaming_novelty_pin(
         "last_n_novelty_kept": last_n_novelty,
         "last_novelty_retention_proxy": round(last_recall_proxy, 4),
         "floor_ratio": floor_ratio,
-        "max_capsules": max_capsules,
+        "max_capsules": dyn_max_caps,
+        "sticky": sticky,
+        "n_sticky_pins": len(sticky_pins),
     }
     return past, last_logits, stats

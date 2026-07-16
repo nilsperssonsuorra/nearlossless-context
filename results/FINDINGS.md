@@ -106,9 +106,11 @@ stream@512, 5 seeds (depths {0,0.5,1} except multi3 mid-only):
 
 Docs: `papers/CAPSULES.md` · `experiments/novelty_detect.py` · `bench_novelty_stress.py`.
 
-### Long-L multi-seed novelty (`novelty_longL_20260716T180614Z`)
+### Long-L multi-seed novelty (`novelty_longL_20260716T180614Z` + sticky `…T210746Z`)
 
-**Protocol:** 3 seeds × 3 depths = **9 cells** per L; L ∈ {8192, 12288, 16384}; arms valley vs novelty @ stream budgets {512, 1536}.
+**Protocol:** 3 seeds × 3 depths = **9 cells** per L.
+
+**v0 (no sticky)** L ∈ {8k, 12k, 16k} valley vs novelty:
 
 | L | valley@512 | **novelty@512** | valley@1536 | novelty@1536 |
 |---|------------|-----------------|-------------|--------------|
@@ -116,18 +118,24 @@ Docs: `papers/CAPSULES.md` · `experiments/novelty_detect.py` · `bench_novelty_
 | **12k** | 33% | **78% (7/9)** | 78% | **89%** |
 | **16k** | 33% | **100% (9/9)** | 78% | **100%** |
 
-Peak cache stays **~1024** (stream@512) vs **~2048** (stream@1536).
+**v0 @24k (partial kill, same code):** novelty@512 **~67% (6/9)** — mid-depth thrash as L grows (re-rank drops early secrets).
 
-**VERDICT: `NOVELTY_LONG_L_WIN`**
+**Sticky novelty v1** (`novelty_longL_20260716T210746Z`): sticky pin registry + score-ranked pin packing + max_capsules scales with L.
+
+| L | novelty@512 | novelty@1536 | Peak cache @512 |
+|---|-------------|--------------|-----------------|
+| **16k** | **9/9 (100%)** | 9/9 | ~1024 |
+| **24k** | **9/9 (100%)** | 9/9 | ~1024 |
+| **32k** | **9/9 (100%)** | 9/9 | ~1024 |
+
+**VERDICT: `NOVELTY_LONG_L_WIN` + `STICKY_NOVELTY_FIX`**
 
 - Under multi-seed hay, **attn valley@512 does not scale** with L (stays ~33%, end-depth only).  
-- **Surface novelty@512** recovers **full multi-seed success at 8k and 16k**, and still beats valley@1536 at those lengths.  
-- Residual flake band around **12k** (2/9 @512); higher budget helps somewhat but is not required at 8k/16k.  
-- **Systems:** multi-seed near-lossless needle through **16k** with peak cache **~1k tokens** (~½ the previous stream@1536 operating point).  
+- **Surface novelty@512** is multi-seed solid through **32k** once pins are sticky (24k: 6/9 → **9/9**).  
+- **Systems:** multi-seed near-lossless needle through **≥32k** with peak cache **~1k tokens** (~½ prior stream@1536 operating point; ~**8×** below full @32k).  
+- Residual risk: 12k v0 had flakes before sticky; 40k not re-measured multi-seed sticky yet.
 
-Prior fixed-filler long-L tables (stream@512 → L_ε=8k; stream@1536 → ≥16k) understated the multi-seed discovery tax for valley and overstated how hard peak@512 is **once discovery works**.
-
-Bench: `experiments/bench_novelty_longL.py`.
+Bench: `experiments/bench_novelty_longL.py` · detector: `novelty_detect.py` (`sticky=True` default).
 
 ### Hybrid transfer: Gemma-4 novelty (`novelty_longL_20260716T181508Z`)
 

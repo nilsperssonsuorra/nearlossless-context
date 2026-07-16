@@ -19,10 +19,10 @@
 |---------|---------|
 | Posthoc seed_valley @176 | ~40× smaller decode KV @8k mid |
 | Stream valley @512 | **Not multi-seed robust** (33% @4k–16k) — end-depth only |
-| Stream novelty @512 | **Multi-seed strong**: ~93% @4k (5×3); **100% @8k & 16k** (3×3); residual ~78% @12k; peak **~1k** |
-| Stream valley @1536 | Multi-seed ~93% @4k; long-\(L\) ok-ish but **worse** than novelty@512 at 8k/16k multi-seed |
+| Stream novelty @512 | **Sticky multi-seed**: ~93% @4k (5×3); **100% @8k–32k** (3×3 sticky); peak **~1k** |
+| Stream valley @1536 | Multi-seed ~93% @4k; long-\(L\) weaker than sticky novelty@512 |
 | Discovery upper bound | oracle_pin stream@512 → **15/15** @4k (**DISCOVERY_IS_THE_GAP**) |
-| Stream ≥28k mid | Prefer **@2048** until re-measured with novelty (valley schedule) |
+| Sticky fix | Long-L thrash (24k 6/9) → sticky pins **9/9 @24k & 32k** |
 | Multi-needle | Posthoc R=8@384; novelty stream often wins valley @512 (stress suite 80%) |
 | Adaptive | Default stream `discovery="novelty"`; single-needle stream@512 through 8k/16k |
 
@@ -30,10 +30,10 @@
 
 | Before (this machine) | After |
 |----------------------|--------|
-| ~4k comfortable full KV; 8k laggy | Multi-seed **16k @ peak~1k cache** (novelty stream@512); valley long-L still **~24k–40k @~2k** |
+| ~4k comfortable full KV; 8k laggy | Multi-seed **≥32k @ peak~1k cache** (sticky novelty stream@512) |
 | Decode KV grows with L | Decode stays small (stream budget); peak cache **flat in \(L\)** |
 
-**~4× longer multi-seed** near-lossless needle at **half** the previous stream peak (1k vs 2k), vs old comfortable 4k full.
+**~8× longer multi-seed** near-lossless needle at **~½** prior stream peak (1k vs 2k), vs old comfortable 4k full.
 
 ## Code entrypoints
 
@@ -77,7 +77,7 @@ See `USAGE.md` and `results/FINDINGS.md`.
 | seed_valley all-cell \(B_{\min}\) | **192** (~1.24× oracle) |
 | stream valley@512 / @1536 @4k | **33% / ~93%** |
 | stream novelty@512 @4k | **93% (14/15)**; stress NL/adv/multi3 strong |
-| stream novelty@512 long-L 3×3 | **9/9 @8k**, **7/9 @12k**, **9/9 @16k** |
+| sticky novelty@512 long-L 3×3 | **9/9 @16k, 24k, 32k** (v0 non-sticky 24k was 6/9) |
 
 Draft: `papers/PAPER_DRAFT.md` · benches: `bench_paper_rigor.py`, `bench_novelty_*.py`
 

@@ -57,7 +57,7 @@ Bench: `experiments/bench_capsules.py`
 2. Mid-stream **attention** is a bad query-unknown detector; **surface novelty** works on this ID/code needle suite.  
 3. Atomic capsules were a red herring until discovery worked.  
 4. Stress suite: NL names/places **87%**, ID-flood filler **100%**, multi3 **80%** vs valley much lower (`novelty_stress_*`).  
-5. Long-\(L\) multi-seed: novelty@512 → **9/9 @8k**, **7/9 @12k**, **9/9 @16k**; valley@512 stays **33%** end-only (`novelty_longL_*`).
+5. Long-\(L\) multi-seed: sticky novelty@512 → **9/9 @16k / 24k / 32k** (non-sticky 24k was 6/9); valley@512 stays **33%** end-only.
 
 ### Code
 
@@ -69,9 +69,9 @@ Bench: `experiments/bench_capsules.py`
 
 | Priority | Work |
 |----------|------|
-| 1 | Multi-seed novelty ≥24k / 40k (raise \(L_\varepsilon\) claim under discovery=novelty) |
-| 2 | ~~Hybrid Gemma-4 novelty transfer~~ **done** — 9/9 @512 multi-seed @4k |
-| 3 | Hybrid novelty+attn fusion for residual 12k flakes / NL misses |
+| 1 | ~~Sticky multi-seed ≥24k/32k~~ **done** — 9/9 @512 through 32k |
+| 2 | Multi-seed sticky @40k; optional fusion for NL residual misses |
+| 3 | ~~Hybrid Gemma-4 novelty transfer~~ **done** — 9/9 @512 multi-seed @4k |
 ## What would count as a win
 
 - Higher multi-seed success than `seed_valley` at the **same** stream budget, or  

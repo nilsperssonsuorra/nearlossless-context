@@ -175,43 +175,29 @@ def policy_for(
             stream_budget=512 if prefer_stream else 192,
             note="single @4k: posthoc@192 / stream@512 (discovery=novelty)",
         )
-    elif L <= 8192:
+    elif L <= 32768:
+        # Sticky novelty multi-seed 9/9 @16k/24k/32k stream@512 (FINDINGS).
         pol = AdaptivePolicy(
             R=1,
-            budget=192,
-            stream_budget=512 if prefer_stream else 192,
-            note="single @8k stream@512 novelty multi-seed 9/9 (attn needs higher)",
+            budget=192 if L <= 8192 else 256,
+            stream_budget=512 if prefer_stream else (192 if L <= 8192 else 256),
+            note="single ≤32k: stream@512 sticky-novelty multi-seed 9/9 (peak~1k)",
         )
-    elif L <= 12288:
-        # Residual multi-seed flakes @512 (~78%); soft raise for reliability.
+    elif L <= 40960:
+        # 40k sticky multi-seed not re-run; keep modest slack
         pol = AdaptivePolicy(
             R=1,
             budget=256,
             stream_budget=768 if prefer_stream else 256,
-            note="single ~12k: stream@768 (novelty@512 was 7/9 multi-seed)",
-        )
-    elif L <= 16384:
-        pol = AdaptivePolicy(
-            R=1,
-            budget=256,
-            stream_budget=512 if prefer_stream else 256,
-            note="single @16k stream@512 novelty multi-seed 9/9 (peak~1k)",
-        )
-    elif L <= 24576:
-        # Not re-measured with multi-seed novelty; keep slack from valley long-L.
-        pol = AdaptivePolicy(
-            R=1,
-            budget=256,
-            stream_budget=1536,
-            note="single @16k–24k stream@1536 (pre-novelty long-L valley schedule)",
+            note="single ~40k: stream@768 (32k sticky@512 solid; 40k unmeasured)",
         )
     else:
-        # ≥28k: mid-depth can flake at 1536 → use 2048
+        # Beyond tested sticky multi-seed envelope
         pol = AdaptivePolicy(
             R=1,
             budget=320,
-            stream_budget=2048,
-            note="single ≥28k stream@2048 (stabilizes mid flake at 28k)",
+            stream_budget=1536,
+            note="single >40k: stream@1536 slack until sticky multi-seed measured",
         )
 
     return calibrate_policy(
