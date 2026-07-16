@@ -39,31 +39,39 @@ Bench: `experiments/bench_capsules.py`
 
 | Arm | @512 | @1024 | @1536 |
 |-----|------|-------|-------|
-| stream_valley | 33% | 67% | 93% |
-| capsules (scored discovery) | 33% | 33% | 87% |
-| **stream_oracle_pin** (perfect discovery) | **100%** | **100%** | — |
+| stream_valley (attn) | 33% | 67% | 93% |
+| capsules (attn discovery) | 33% | 33% | 87% |
+| **stream_oracle_pin** | **100%** | **100%** | — |
+| **stream_novelty** (surface detector) | **93% (14/15)** | **93%** | — |
 
-**VERDICT: `DISCOVERY_IS_THE_GAP`** (`capsules_20260716T162035Z`)
+**VERDICT: `DISCOVERY_IS_THE_GAP` → `NOVELTY_DETECTOR_OK` (v0)**  
+(`capsules_20260716T162035Z`, `capsules_20260716T164126Z`)
 
-- Perfect discovery (force critical±R whenever still in cache) → **15/15** at stream **@512** multi-seed.  
-- Same peak budget where valley is **5/15**.  
-- Oracle retention = 1.0 every cell.  
-- Therefore: **stream peak budget is enough**; **finding** the neighborhood online is not.
+- Perfect discovery → 15/15 @512.  
+- **Surface novelty detector** (rarity + digits/ID-like tokens, no question) → **14/15 @512**, same peak class as valley that only gets 5/15.  
+- Closes most of the discovery gap **without** final-question attention.
 
 ### What we learned
 
-1. Atomic packing / sticky / pin-on-exit **without true facts** cannot beat valley.  
-2. **If discovery were solved, stream@512 would match H1 multi-seed** — huge systems implication.  
-3. Mid-stream attention is a **bad query-unknown detector** on this suite.  
-4. The fresh research target is now precise: **query-unknown fact discovery under peak-KV**, not another packer.
+1. Peak@512 is enough for multi-seed when neighborhoods are retained.  
+2. Mid-stream **attention** is a bad query-unknown detector; **surface novelty** works on this ID/code needle suite.  
+3. Atomic capsules were a red herring until discovery worked.  
+4. Stress suite: NL names/places **87%**, ID-flood filler **100%**, multi3 **80%** vs valley much lower (`novelty_stress_*`).  
+5. Long-\(L\) multi-seed: novelty@512 → **9/9 @8k**, **7/9 @12k**, **9/9 @16k**; valley@512 stays **33%** end-only (`novelty_longL_*`).
+
+### Code
+
+- `experiments/novelty_detect.py` — `prefill_streaming_novelty_pin`  
+- Default: `prefill_auto(..., mode="stream", discovery="novelty")`  
+- Benches: `bench_capsules.py --novelty`, `bench_novelty_stress.py`, `bench_novelty_longL.py`
 
 ### Next
 
 | Priority | Work |
 |----------|------|
-| **1** | New detector (not last-window attn alone): multi-probe, novelty, entity-ish, small auxiliary model |
-| 2 | Keep oracle_pin as regression upper bound in CI |
-| 3 | Package H1 multi-seed + this gap as paper core narrative |
+| 1 | Multi-seed novelty ≥24k / 40k (raise \(L_\varepsilon\) claim under discovery=novelty) |
+| 2 | ~~Hybrid Gemma-4 novelty transfer~~ **done** — 9/9 @512 multi-seed @4k |
+| 3 | Hybrid novelty+attn fusion for residual 12k flakes / NL misses |
 ## What would count as a win
 
 - Higher multi-seed success than `seed_valley` at the **same** stream budget, or  

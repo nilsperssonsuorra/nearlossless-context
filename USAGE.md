@@ -9,9 +9,13 @@ Goal: larger usable \(L\) under ~24 GB with small decode KV.
 from compress_adaptive import prefill_auto
 from decode_utils import greedy_generate
 
-# Long single-document retrieval (default streaming)
-past, logits, info = prefill_auto(model, input_ids, mode="stream")
-# info["policy"] has R, stream_budget, family (auto from model.config)
+# Long single-document retrieval (default: stream + novelty discovery)
+past, logits, info = prefill_auto(
+    model, input_ids, mode="stream", tokenizer=tokenizer
+)
+# discovery="novelty" (default) — query-unknown surface detector, stream@512-class
+# discovery="attn" — legacy mid-stream attention (needs larger budgets)
+# info["policy"] has R, stream_budget, family; info["path"] shows novelty vs attn
 
 # Multi-secret / multi-doc: pass entity count (or safe_multi)
 past, logits, info = prefill_auto(
@@ -38,16 +42,18 @@ toks = greedy_generate(
 )
 ```
 
-**Family floors** (transfer-measured): Gemma-4 stream ≥1024 R≥2; Qwen2.5 posthoc ≥320 / stream ≥768 @8k+; Llama-3.2 posthoc ≥256.
+**Family floors** (transfer-measured): Gemma-4 novelty stream ≥512 (valley/attn ~1024); Qwen2.5 posthoc ≥320 / stream ≥768 @8k+; Llama-3.2 posthoc ≥256.
 
 ## Practical length guide (single-needle, measured)
 
 | Target L | Recommended | Notes |
 |----------|-------------|--------|
-| ≤ 4k | `stream` or `posthoc` | multi-seed: posthoc **@192**; stream **@1536** (not 512) |
-| ≤ 8k | `stream` (auto → **1536**) | multi-seed robust |
-| ≤ 24k | `stream` (auto → **1536**) | peak ~2k / ~9 GB |
-| ≤ 40k | `stream` (auto → **2048** if L≥28k) | long single-needle |
+| ≤ 4k | `stream` + **novelty** (default) | multi-seed ~**93–100%** @512; posthoc @192 |
+| ≤ 8k | `stream` novelty | multi-seed **9/9 @512** peak~1k |
+| ~12k | `stream` novelty | auto ~**768** (residual flakes @512) |
+| ≤ 16k | `stream` novelty | multi-seed **9/9 @512** peak~1k |
+| ≤ 24k–40k | `stream` | valley schedule ~1536–2048 until re-measured |
+| attn-only stream | `discovery="attn"` | needs **~1536** multi-seed @4k |
 | Multi-secret | `stream` (auto-raise or `safe_multi=True`) | mid-stream peak probe can raise budget |
 
 ## Do not

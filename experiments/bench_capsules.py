@@ -42,6 +42,7 @@ from capsules import (  # noqa: E402
 )
 from config import PRIMARY_MODEL_ID, RESULTS_DIR, SNAPKV_WINDOW  # noqa: E402
 from decode_utils import greedy_generate  # noqa: E402
+from novelty_detect import prefill_streaming_novelty_pin  # noqa: E402
 from scorer_valley import prefill_streaming_valley  # noqa: E402
 from snapkv import cache_nbytes, cache_seq_len, prefill_chunked  # noqa: E402
 from utils import write_csv  # noqa: E402
@@ -63,6 +64,11 @@ def parse_args() -> argparse.Namespace:
         "--oracle-online",
         action="store_true",
         help="Also run perfect-discovery stream upper bound (oracle pin)",
+    )
+    p.add_argument(
+        "--novelty",
+        action="store_true",
+        help="Run surface-novelty query-unknown detector stream",
     )
     p.add_argument(
         "--skip-capsules",
@@ -335,6 +341,62 @@ def main() -> None:
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
 
+                # surface novelty query-unknown detector
+                if args.novelty:
+                    try:
+                        past, logits, st = prefill_streaming_novelty_pin(
+                            model,
+                            tokenizer,
+                            input_ids,
+                            stream_budget=B,
+                            final_budget=B,
+                            chunk_size=512,
+                            window_size=args.window,
+                            sinks=8,
+                            expand_radius=args.R,
+                        )
+                        sc = decode(model, tokenizer, past, logits, seq_len, args.max_new)
+                        # measure span recall of novelty pins vs critical if possible
+                        rows.append(
+                            {
+                                "arm": f"stream_novelty@{B}",
+                                "seed": seed,
+                                "depth": depth,
+                                "budget": B,
+                                "success": sc["success"],
+                                "hits": sc["hits"],
+                                "cache_tokens": cache_seq_len(past),
+                                "peak_cache": st.get("peak_cache"),
+                                "novelty_ret_proxy": st.get(
+                                    "last_novelty_retention_proxy"
+                                ),
+                                "kv_mb": round(cache_nbytes(past) / (1024**2), 3),
+                                "answer": sc["answer"][:80].replace("\n", " "),
+                            }
+                        )
+                        print(
+                            f"  novelty@{B}: ok={sc['success']} "
+                            f"peak={st.get('peak_cache')} "
+                            f"nret={st.get('last_novelty_retention_proxy')}",
+                            flush=True,
+                        )
+                        del past
+                    except Exception as e:
+                        rows.append(
+                            {
+                                "arm": f"stream_novelty@{B}",
+                                "seed": seed,
+                                "depth": depth,
+                                "budget": B,
+                                "success": False,
+                                "status": f"ERR:{type(e).__name__}",
+                                "answer": str(e)[:100],
+                            }
+                        )
+                        print(f"  novelty@{B}: ERR {e}", flush=True)
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
     # Aggregate
     def rate(arm: str) -> dict:
         sel = [
@@ -355,6 +417,8 @@ def main() -> None:
             summary[f"stream_capsules@{B}"] = rate(f"stream_capsules@{B}")
         if args.oracle_online:
             summary[f"stream_oracle_pin@{B}"] = rate(f"stream_oracle_pin@{B}")
+        if args.novelty:
+            summary[f"stream_novelty@{B}"] = rate(f"stream_novelty@{B}")
     if not args.skip_full_oracle:
         summary["full"] = rate("full")
         summary["oracle_r1"] = rate("oracle_r1")
@@ -365,7 +429,30 @@ def main() -> None:
 
     # Verdict
     verdict = "CAPSULES_MIXED"
-    if args.oracle_online:
+    if args.novelty:
+        n_rates = [
+            summary.get(f"stream_novelty@{B}", {}).get("rate") for B in budgets
+        ]
+        n_rates = [r for r in n_rates if r is not None]
+        v_rates = [
+            summary.get(f"stream_valley@{B}", {}).get("rate") for B in budgets
+        ]
+        v_rates = [r for r in v_rates if r is not None]
+        o_rates = [
+            summary.get(f"stream_oracle_pin@{B}", {}).get("rate") for B in budgets
+        ]
+        o_rates = [r for r in o_rates if r is not None]
+        if n_rates and min(n_rates) >= 0.9:
+            verdict = "NOVELTY_DETECTOR_OK"
+        elif n_rates and v_rates and max(n_rates) > max(v_rates) + 0.15:
+            verdict = "NOVELTY_BEATS_VALLEY"
+        elif n_rates and v_rates and max(n_rates) <= max(v_rates):
+            verdict = "NOVELTY_NO_GAIN"
+        else:
+            verdict = "NOVELTY_MIXED"
+        if o_rates and n_rates and min(o_rates) >= 0.9 and max(n_rates) < 0.9:
+            verdict = verdict  # keep novelty verdict; gap still known
+    elif args.oracle_online:
         o_rates = [
             summary.get(f"stream_oracle_pin@{B}", {}).get("rate") for B in budgets
         ]

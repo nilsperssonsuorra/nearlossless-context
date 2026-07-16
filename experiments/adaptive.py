@@ -69,7 +69,8 @@ def calibrate_policy(
     Primary (Qwen3-4B) schedule is left unchanged. Floors from FINDINGS transfer:
       qwen25  — posthoc ≥320; stream ≥768 when L≥8k
       llama32 — posthoc ≥256; stream@512 ok
-      gemma4  — posthoc@176 ok; stream ≥1024 and R≥2 (single-needle class)
+      gemma4  — posthoc@176 ok; stream novelty@512 multi-seed OK
+                (attn/valley still needs ~1024 — see compress_adaptive attn floor)
     """
     fam = infer_model_family(model_id)
     if fam == "primary":
@@ -88,15 +89,15 @@ def calibrate_policy(
         extra += " posthoc≥256"
     elif fam == "gemma4":
         # Hybrid: posthoc seed_valley@176 works after score-pass fix.
-        # Stream needs more retention + valley radius than primary.
+        # Novelty stream@512 multi-seed 9/9 @4k (novelty_longL_…181508Z);
+        # valley@512 only end-depth (33%) — attn path floors separately.
         if prefer_stream:
-            R = max(R, 2)
-            stream = max(stream, 1024)
+            stream = max(stream, 512)
             if L >= 28000:
                 stream = max(stream, 2048)
             elif L >= 16000:
                 stream = max(stream, 1536)
-            extra += " stream≥1024 R≥2"
+            extra += " stream≥512 novelty (valley needs ~1024)"
         else:
             budget = max(budget, 176)
             extra += " posthoc≥176"
@@ -164,37 +165,45 @@ def policy_for(
             stream_budget=1024,
             note="2-entity: use multi-needle R=8 schedule (safer than 2-hop R=1)",
         )
-    # Single needle: scale stream budget with L
+    # Single needle: novelty discovery keeps stream@512 strong through 16k
+    # multi-seed (novelty_longL_20260716T180614Z). Attn-only still needs 1536+.
     elif L <= 4096:
-        # Multi-seed rigor (5×3): stream@512 only ~33%; @1536 ~93% all depths.
-        # Posthoc seed_valley global min budget with ε=0: 192 (~1.24× oracle).
+        # Posthoc: multi-seed tax → 192. Stream+novelty ~93–100% @512 multi-seed.
         pol = AdaptivePolicy(
             R=1,
             budget=192,
-            stream_budget=1536 if prefer_stream else 192,
-            note="single @4k: posthoc@192 (multi-seed) / stream@1536 (multi-seed)",
+            stream_budget=512 if prefer_stream else 192,
+            note="single @4k: posthoc@192 / stream@512 (discovery=novelty)",
         )
     elif L <= 8192:
         pol = AdaptivePolicy(
             R=1,
             budget=192,
-            stream_budget=1536,
-            note="single @8k stream@1536 (multi-seed robust)",
+            stream_budget=512 if prefer_stream else 192,
+            note="single @8k stream@512 novelty multi-seed 9/9 (attn needs higher)",
         )
-
     elif L <= 12288:
+        # Residual multi-seed flakes @512 (~78%); soft raise for reliability.
         pol = AdaptivePolicy(
             R=1,
             budget=256,
-            stream_budget=1024,
-            note="single ~12k: raise stream (mid fails @512)",
+            stream_budget=768 if prefer_stream else 256,
+            note="single ~12k: stream@768 (novelty@512 was 7/9 multi-seed)",
+        )
+    elif L <= 16384:
+        pol = AdaptivePolicy(
+            R=1,
+            budget=256,
+            stream_budget=512 if prefer_stream else 256,
+            note="single @16k stream@512 novelty multi-seed 9/9 (peak~1k)",
         )
     elif L <= 24576:
+        # Not re-measured with multi-seed novelty; keep slack from valley long-L.
         pol = AdaptivePolicy(
             R=1,
             budget=256,
             stream_budget=1536,
-            note="single @16k–24k stream@1536 (reliable)",
+            note="single @16k–24k stream@1536 (pre-novelty long-L valley schedule)",
         )
     else:
         # ≥28k: mid-depth can flake at 1536 → use 2048

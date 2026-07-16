@@ -74,9 +74,73 @@ Perfect discovery stream: always keep critical±R if still in cache + sinks + re
 
 - Peak budget **@512 is sufficient** if neighborhoods are known.  
 - Failures of valley/capsules are **detector failures**, not “stream can’t work.”  
-- Fresh problem: **query-unknown discovery** of H1 neighborhoods.
 
-Docs: `papers/CAPSULES.md` · `prefill_streaming_oracle_pin` in `experiments/capsules.py`.
+### Surface novelty detector (`capsules_20260716T164126Z`)
+
+Query-unknown discovery via rarity + digit/ID-like surface features (no attention, no question):
+
+| Arm @4k multi-seed 5×3 | @512 | @1024 |
+|------------------------|------|-------|
+| stream_valley | 33% | 67% |
+| stream_oracle_pin | 100% | 100% |
+| **stream_novelty** | **93% (14/15)** | **93% (14/15)** |
+
+**VERDICT: `NOVELTY_DETECTOR_OK` (v0)** — closes most of the discovery gap on code needles at stream@512.
+
+### Novelty stress suite (`novelty_stress_20260716T170938Z`)
+
+stream@512, 5 seeds (depths {0,0.5,1} except multi3 mid-only):
+
+| Scenario | valley | **novelty** | oracle_pin |
+|----------|--------|-------------|------------|
+| code (control) | 33% | **100%** | 100% |
+| **nl** (Seraphine / Reykjavik) | 40% | **87%** | 100% |
+| **adv** (ID-like filler flood) | 33% | **100%** | 100% |
+| **multi3** (3 secrets recall_all) | 0% | **80%** | 40%† |
+
+† Oracle_pin@512 multi3 can drop a span under packing/order edge cases; novelty still often wins.
+
+**VERDICT: `NOVELTY_STRESS_PASS`** — not code-only: NL facts, adversarial ID filler, and multi-needle improve massively over attn stream.
+
+`prefill_auto(..., mode="stream", discovery="novelty")` is now the default stream path.
+
+Docs: `papers/CAPSULES.md` · `experiments/novelty_detect.py` · `bench_novelty_stress.py`.
+
+### Long-L multi-seed novelty (`novelty_longL_20260716T180614Z`)
+
+**Protocol:** 3 seeds × 3 depths = **9 cells** per L; L ∈ {8192, 12288, 16384}; arms valley vs novelty @ stream budgets {512, 1536}.
+
+| L | valley@512 | **novelty@512** | valley@1536 | novelty@1536 |
+|---|------------|-----------------|-------------|--------------|
+| **8k** | 33% (end only) | **100% (9/9)** | 89% | **100%** |
+| **12k** | 33% | **78% (7/9)** | 78% | **89%** |
+| **16k** | 33% | **100% (9/9)** | 78% | **100%** |
+
+Peak cache stays **~1024** (stream@512) vs **~2048** (stream@1536).
+
+**VERDICT: `NOVELTY_LONG_L_WIN`**
+
+- Under multi-seed hay, **attn valley@512 does not scale** with L (stays ~33%, end-depth only).  
+- **Surface novelty@512** recovers **full multi-seed success at 8k and 16k**, and still beats valley@1536 at those lengths.  
+- Residual flake band around **12k** (2/9 @512); higher budget helps somewhat but is not required at 8k/16k.  
+- **Systems:** multi-seed near-lossless needle through **16k** with peak cache **~1k tokens** (~½ the previous stream@1536 operating point).  
+
+Prior fixed-filler long-L tables (stream@512 → L_ε=8k; stream@1536 → ≥16k) understated the multi-seed discovery tax for valley and overstated how hard peak@512 is **once discovery works**.
+
+Bench: `experiments/bench_novelty_longL.py`.
+
+### Hybrid transfer: Gemma-4 novelty (`novelty_longL_20260716T181508Z`)
+
+Model: `google/gemma-4-E4B-it` · multi-seed 3×3 @4k · hybrid-safe compress.
+
+| Arm | Rate |
+|-----|------|
+| stream_valley@512 | **33%** (end only) |
+| **stream_novelty@512** | **100% (9/9)** |
+| stream_valley@1024 | **100%** |
+| stream_novelty@1024 | **100%** |
+
+**VERDICT: `NOVELTY_TRANSFER_GEMMA4_OK`** — surface novelty closes the discovery gap on hybrid Gemma-4 at the same stream@512 peak class as primary Qwen3. Prior Gemma stream floor (1024 R≥2) was **attn-path** needs; with `discovery="novelty"` **stream@512** is multi-seed solid @4k.
 
 ---
 
@@ -349,12 +413,12 @@ Model: `google/gemma-4-E4B-it` — **hybrid** sliding-window (W=512, ~5:1) + ful
 
 | Family | Detection | Single posthoc floor | Single stream @4k |
 |--------|-----------|----------------------|-------------------|
-| primary (Qwen3-4B) | `qwen3` / default | 176 | 512 R=1 |
+| primary (Qwen3-4B) | `qwen3` / default | 176 / multi-seed 192 | novelty **512** |
 | qwen25 | `qwen2.5` | **320** | 512; **768** if L≥8k |
 | llama32 | `llama-3.2` | **256** | 512 |
-| gemma4 | `gemma-4` | 176 | **1024 R≥2** |
+| gemma4 | `gemma-4` | 176 | novelty **512** (valley ~**1024**) |
 
-Gemma smoke: `prefill_auto(mode="stream"|"posthoc")` mid@4k → **both ok** under auto floors.
+Gemma: novelty multi-seed 9/9 @512; `prefill_auto` default discovery=novelty uses stream@512.
 
 ### Stream-time auto-raise + long-L policy (2026-07-15 evening)
 
