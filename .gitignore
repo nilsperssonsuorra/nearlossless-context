@@ -11,3 +11,12 @@ results/*.json
 *.safetensors
 .cache/
 huggingface/
+
+# LaTeX build junk (keep papers/main.pdf + main.tex)
+papers/*.aux
+papers/*.log
+papers/*.out
+papers/*.toc
+papers/*.synctex.gz
+papers/*.fls
+papers/*.fdb_latexmk

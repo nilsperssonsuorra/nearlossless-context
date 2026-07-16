@@ -79,7 +79,7 @@ See `USAGE.md` and `results/FINDINGS.md`.
 | stream novelty@512 @4k | **93% (14/15)**; stress NL/adv/multi3 strong |
 | sticky novelty@512 long-L 3×3 | **9/9 @16k, 24k, 32k, 40k** (v0 non-sticky 24k was 6/9) |
 
-Draft (narrative + limitations + figure): `papers/PAPER_DRAFT.md` · fig: `papers/figures/fig1_story.png` · benches: `bench_paper_rigor.py`, `bench_novelty_*.py`, `plot_paper_figures.py`
+Draft: `papers/PAPER_DRAFT.md` · **PDF:** `papers/main.pdf` (`build_pdf.ps1` / `main.tex`) · fig: `papers/figures/fig1_story.png`
 
 ## Fresh line: query-unknown discovery
 

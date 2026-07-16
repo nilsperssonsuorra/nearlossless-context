@@ -1,0 +1,251 @@
+% Near-lossless long context — portfolio / workshop draft
+% Build:  pdflatex -interaction=nonstopmode main.tex   (from papers/)
+% Or:     powershell -File build_pdf.ps1
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{times}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{microtype}
+\usepackage{url}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!50!black,
+  citecolor=blue!50!black,
+  urlcolor=blue!50!black
+}
+
+\title{\textbf{Near-Lossless Long Context under Fixed VRAM\\via Critical-Span Retention}}
+\author{
+  Portfolio / workshop-style draft\\
+  Lab: RTX 3090 24\,GB \quad
+  Primary: \texttt{Qwen/Qwen3-4B-Instruct-2507}\\
+  Repo: \texttt{nearlossless-context}\quad
+  Updated: 2026-07-16
+}
+\date{}
+
+\begin{document}
+\maketitle
+\begin{abstract}
+Long-context inference is limited by KV-cache memory. Training-free eviction methods shrink the cache, but it is often unclear \emph{which} tokens are necessary for near--full-KV quality. On a multi-seed controlled retrieval suite (Qwen3-4B, RTX 3090), we show three linked results:
+
+\begin{enumerate}[leftmargin=*,itemsep=2pt]
+  \item \textbf{Structure (H1$'$).}
+  Retaining critical fact tokens plus a small local radius $R^*=1$ (with attention sinks and a recent/question window) is \textbf{necessary and sufficient} for $\varepsilon\!\approx\!0$ single-fact recall: oracle \textbf{15/15}, anti-oracle \textbf{0/15}, full KV \textbf{15/15} (5 seeds $\times$ 3 depths @4k).
+  \item \textbf{Discovery gap.}
+  Online streaming at a moderate peak budget fails under multi-seed hay not because the budget is too small, but because \textbf{query-unknown discovery is weak}: attention stream@512 is \textbf{33\%}, while perfect online pin of critical$\pm R$ is \textbf{15/15} at the same peak.
+  \item \textbf{Closing the gap.}
+  A \textbf{surface novelty detector} (within-prefix rarity + digit/ID-like cues; no final question) with \textbf{sticky pin packing} reaches $\sim$\textbf{93\%} multi-seed @4k and \textbf{100\%} ($3\times3$) through \textbf{40k} at stream@512---peak cache $\sim$\textbf{1k tokens}, flat in $L$.
+\end{enumerate}
+
+The critical-span mechanism transfers across Qwen2.5, Llama-3.2, and hybrid Gemma-4 (full layers). We do \textbf{not} claim general long-context SOTA; see Section~\ref{sec:limits}.
+\end{abstract}
+
+\section{Introduction}
+
+KV cache memory grows with context length $L$. On a fixed workstation (here: 24\,GB), full-cache decode becomes the bottleneck long before ``the model cannot attend.'' Training-free compressors (observation-window scoring, recent-only eviction, SnapKV-style selection) reduce tokens kept, but practice often optimizes average scores rather than \textbf{guaranteeing} the spans that encode answers.
+
+We study \textbf{near-lossless} compression on retrieval-critical prompts: quality $Q$ should match full KV at $\varepsilon\!\approx\!0$ under a multi-seed protocol. The systems objective is
+\begin{equation}
+  L_\varepsilon \;=\; \max\bigl\{\, L : Q(M,L) \ge (1-\varepsilon)\,Q(\mathrm{Full},L) \,\bigr\}
+\end{equation}
+under \textbf{peak} cache / VRAM constraints---not only final decode size after a full prefill.
+
+\paragraph{Claim.}
+Near-lossless training-free KV compression is better understood as \textbf{retaining critical local neighborhoods} (and discovering them online before the question exists) than as uniform thinning or posthoc score ranking alone.
+
+\section{Related work (sketch)}
+
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item \textbf{Eviction / selection:} H2O, SnapKV, pyramid and related training-free keepers.
+  \item \textbf{Hybrid attention:} sliding-window + full layers (e.g.\ Gemma-4); full-layer KV still dominates compressible state.
+  \item \textbf{Quantization} (KIVI, etc.): complementary; we use fake-int8 only for logical byte accounting.
+\end{itemize}
+
+\paragraph{Positioning.}
+Mechanism + workstation $L_\varepsilon$, not a leaderboard chase. Novelty is a \textbf{query-unknown discovery} layer on top of H1$'$ retention, not a new attention kernel.
+
+\section{Methods (short)}
+
+\paragraph{Task.}
+Needle-in-haystack style secrets in seeded filler; depths $\{0,0.5,1\}$; success = exact key recall (greedy decode).
+
+\paragraph{H1$'$ keep set.}
+sinks $\cup$ critical$\pm R$ $\cup$ recent/question window. Kill arms: full, oracle\_r1, anti\_oracle.
+
+\paragraph{Posthoc scorer.}
+\texttt{seed\_valley}: shared obs-window attention $\to$ seeds $\to$ contiguous valley + $\pm R$.
+
+\paragraph{Streaming.}
+Chunked prefill; compress when cache $>$ budget; peak $\approx$ budget + chunk.
+
+\paragraph{Oracle-online upper bound.}
+Force-keep critical$\pm R$ whenever still in cache (perfect discovery).
+
+\paragraph{Surface novelty (query-unknown).}
+Per-token score from within-prefix rarity, first occurrence, and surface cues (digits, ID-like pieces). Expand peaks $\pm R$ into pin sets. \textbf{Sticky} registry: once discovered, pins stay until evicted; packing ranks pins by score under budget (sinks + recent reserved).
+
+\paragraph{Default API.}
+\texttt{prefill\_auto(\ldots, mode="stream", discovery="novelty")}.
+
+\section{Results}
+
+\subsection{Figure 1 --- Story in four panels}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{figures/fig1_story.pdf}
+  \caption{\textbf{Story figure.}
+  \textbf{(A)}~H1$'$ kill test @4k multi-seed ($5\times3$): full and oracle crit$\pm1$ both 15/15; anti-oracle 0/15.
+  \textbf{(B)}~Discovery gap at stream@512: valley 33\%, surface novelty 93\%, oracle pin 100\%.
+  \textbf{(C)}~Long-$L$ multi-seed success: sticky novelty@512 holds 9/9 through 40k; valley@512 stays end-only ($\sim$33\%).
+  \textbf{(D)}~Peak cache tokens stay flat ($\sim$1k) under sticky novelty stream@512 while full KV grows with $L$.}
+  \label{fig:story}
+\end{figure}
+
+\paragraph{A. H1$'$ kill (4k, $5\times3$ multi-seed).}
+Full and oracle crit$\pm1$ both \textbf{15/15}; anti-oracle \textbf{0/15}. Bare critical tokens without radius often corrupt trailing digits (H1 needs local context); $R^*=1$ restores $\varepsilon\!\approx\!0$. Mean $|\mathrm{oracle}| \approx$ \textbf{149} tokens vs full $\sim$4k.
+
+\paragraph{B. Discovery gap (stream@512).}
+Attention valley \textbf{33\%}; surface novelty \textbf{93\%} (14/15); oracle pin \textbf{100\%}. Peak budget is in the same class ($\sim$1k with chunk). Failures of valley at 512 are \textbf{detector} failures, not ``stream cannot work.''
+
+\paragraph{C. Long $L$ multi-seed ($3\times3$).}
+Sticky novelty@512 is \textbf{9/9} at 16k, 24k, 32k, and \textbf{40k}. Non-sticky novelty degraded at 24k ($\sim$6/9) via re-rank thrash; sticky packing fixed it. Valley@512 remains end-depth-only ($\sim$33\%) under multi-seed hay as $L$ grows.
+
+\paragraph{D. Peak cache.}
+Full KV scales with $L$; sticky novelty stream@512 stays $\sim$\textbf{1k} tokens. Prior valley operating points often used $\sim$1.5--2k peak for long $L$.
+
+\subsection{Scorer tax (posthoc, question known)}
+
+\begin{table}[h]
+\centering
+\caption{Posthoc budget tax vs oracle keep set (4k multi-seed).}
+\label{tab:tax}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Method & All-cell $B_{\min}$ & Tax vs mean $|\mathrm{oracle}|$ \\
+\midrule
+oracle\_r1 & $\sim$149 & $1.0\times$ \\
+seed\_valley & \textbf{192} & $\sim$\textbf{1.24}$\times$ global / $\sim$\textbf{1.16}$\times$ mean \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Posthoc is near-oracle-tight; \textbf{stream is not}, until discovery improves.
+
+\subsection{Stress and transfer (summary)}
+
+\begin{table}[h]
+\centering
+\caption{Stress suite and cross-model transfer (summary).}
+\label{tab:transfer}
+\begin{tabular}{@{}lp{0.55\textwidth}@{}}
+\toprule
+Check & Result \\
+\midrule
+NL facts (names/places) sticky novelty@512 & \textbf{15/15} multi-seed \\
+Code needles sticky & \textbf{15/15} \\
+Adversarial ID-like filler (pre-sticky) & novelty \textbf{100\%} vs valley \textbf{33\%} \\
+Multi-needle recall\_all @512 & novelty $\sim$\textbf{80\%} (open packing edge) \\
+Gemma-4 E4B hybrid novelty@512 & multi-seed \textbf{9/9} @4k (valley needs $\sim$1024) \\
+Qwen2.5 / Llama-3.2 & H1 holds; family-specific posthoc floors \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Adaptive policy (systems)}
+
+\texttt{prefill\_auto} applies $L$-based budgets + per-model floors. With default \texttt{discovery="novelty"}, single-needle stream@\textbf{512} is the measured multi-seed operating point through \textbf{40k}. Attn-only discovery still needs larger floors ($\sim$1536 multi-seed @4k). Hybrid Gemma: compress \textbf{full} layers only; sliding layers keep absolute prefix bookkeeping for score-pass.
+
+\section{Limitations and what we do \emph{not} claim}
+\label{sec:limits}
+
+\subsection{What we claim}
+
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item On this \textbf{controlled multi-seed retrieval suite}, critical$\pm R^*$ is necessary/sufficient for $\varepsilon\!\approx\!0$ single-fact recall.
+  \item Stream failures at moderate budget are primarily a \textbf{query-unknown discovery} problem (oracle-online upper bound).
+  \item Sticky surface novelty \textbf{closes most of that gap} through \textbf{40k} multi-seed at peak cache $\sim$1k on the primary model, with transfer smoke to other small instruct models including hybrid Gemma-4.
+\end{itemize}
+
+\subsection{What we do \emph{not} claim}
+
+\begin{table}[h]
+\centering
+\caption{Scope boundaries (honest).}
+\label{tab:noclaim}
+\small
+\begin{tabular}{@{}p{0.32\textwidth}p{0.58\textwidth}@{}}
+\toprule
+\textbf{Not claimed} & \textbf{Why} \\
+\midrule
+General long-context SOTA &
+  No full RULER / LongBench / InfiniteBench leaderboard evaluation. \\
+All task types &
+  Suite is retrieval / needle-class (+ limited multi-needle and NL facts). Reasoning chains, code repos, multi-doc QA largely untested. \\
+Oracle-tight online budgets for free &
+  Sticky novelty $\approx$ oracle quality on this suite at@512, but multi-secret packing ($\sim$80\% multi3) and suite-alignment remain. \\
+Production memory stack &
+  Fake-int8 is logical accounting only; no fused kernels or serving productization. \\
+Novelty as universal ``importance'' &
+  Exploits surface distinctness vs repetitive filler; ID-like filler / filler-like secrets can still confuse discovery. \\
+Large models / training-free SOTA &
+  Primary evidence is $\sim$3--4B instruct models on one GPU class. \\
+Statistical finality &
+  Multi-seed $N$ modest ($5\times3$ @4k; $3\times3$ long-$L$). Lab-grade, not a large meta-analysis. \\
+$\varepsilon\!=\!0$ beyond measured envelope &
+  Sticky multi-seed measured through \textbf{40k}; longer $L$ is extrapolation. \\
+Peak VRAM $=$ final decode KV &
+  Streaming caps \textbf{peak cache tokens}; weights and activations still dominate total VRAM. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Threats to validity}
+
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item \textbf{Greedy decode} and chat templates may interact with exact-match scoring.
+  \item \textbf{Filler distribution} is synthetic; natural corpora may change novelty baselines.
+  \item \textbf{Hybrid models:} only full layers are compressed; sliding-window behavior is infrastructure-sensitive.
+  \item \textbf{Selection bias toward positive arms:} we iterated methods until discovery worked; negative results (scored capsules alone, non-sticky long-$L$) are reported but the path is research-in-the-loop.
+\end{itemize}
+
+\section{Conclusion}
+
+Near-lossless training-free KV compression on retrieval tasks is structured by \textbf{critical local neighborhoods}. When the question is known, a simple attention valley scorer approximates the oracle keep set with small tax. When the question is \textbf{not} known---as in online streaming---the binding constraint is \textbf{discovery}. Sticky surface novelty is a lightweight query-unknown detector that, on our multi-seed suite, restores high success through \textbf{40k} context at a \textbf{flat $\sim$1k-token peak cache}, transferring to hybrid Gemma-4 at primary-class budgets. The honest next steps are broader tasks and multi-entity packing---not larger single-needle grids alone.
+
+\section*{Reproducibility}
+
+\begin{verbatim}
+# Multi-seed H1 + scorer tax
+python experiments/bench_paper_rigor.py --seeds 0,1,2,3,4 --ctx 4096
+
+# Discovery gap / novelty
+python experiments/bench_capsules.py --novelty --oracle-online \
+  --skip-capsules --budgets 512
+python experiments/bench_novelty_stress.py
+python experiments/bench_novelty_longL.py \
+  --ctx 16384,24576,32768,40960 --arms novelty --budgets 512
+
+# Figure
+python experiments/plot_paper_figures.py
+
+# Transfer
+python experiments/bench_transfer.py --model google/gemma-4-E4B-it
+\end{verbatim}
+
+\noindent
+\textbf{Primary model:} \texttt{Qwen/Qwen3-4B-Instruct-2507}, transformers, CUDA bf16, RTX 3090.\\
+\textbf{Artifact index:} \texttt{results/FINDINGS.md}.\\
+\textbf{Markdown twin:} \texttt{papers/PAPER\_DRAFT.md}.\\
+\textbf{Build PDF:} from \texttt{papers/}, run \texttt{powershell -File build\_pdf.ps1}.
+
+\end{document}

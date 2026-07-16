@@ -6,7 +6,8 @@
 **Last updated:** 2026-07-16  
 
 > Primary multi-seed tables: `results/paper_rigor_*`, `novelty_*`, `FINDINGS.md`.  
-> **Figure:** [`figures/fig1_story.png`](figures/fig1_story.png) (regenerate: `python experiments/plot_paper_figures.py`).
+> **Figure:** [`figures/fig1_story.png`](figures/fig1_story.png) (regenerate: `python experiments/plot_paper_figures.py`).  
+> **Readable PDF:** [`main.pdf`](main.pdf) — build with `powershell -File papers/build_pdf.ps1` (LaTeX source: `main.tex`).
 
 ---
 
