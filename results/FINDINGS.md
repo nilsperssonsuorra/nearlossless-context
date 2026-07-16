@@ -51,17 +51,32 @@ Earlier FINDINGS “stream@512 all depths @4k” used **fixed filler** (no seed)
 
 ## Fact capsules (new direction, 2026-07-16)
 
-**Idea:** compress *atomic neighborhoods* (H1′ objects) under **query-unknown** streaming; sticky absolute registry pins mid-stream peaks.
+**Idea:** compress *atomic neighborhoods* (H1′ objects) under **query-unknown** streaming; sticky registry + **pin-on-exit** / **pin_hist**.
 
-| stream budget | valley | capsules (atomic+fill+sticky) |
-|---------------|--------|-------------------------------|
-| 512 | 33% | 33% |
-| 1024 | **67%** | 33% |
-| 1536 | **93%** | 87% |
+| stream budget | valley | capsules v0 sticky | capsules v1 pin-on-exit |
+|---------------|--------|--------------------|-------------------------|
+| 512 | 33% | 33% | 33% |
+| 1024 | **67%** | 33% | 33% |
+| 1536 | **93%** | 87% | 87% |
 
-**VERDICT: `CAPSULES_NO_GAIN` (v0)** — packing/atomicity is not the bottleneck; **mid-stream discovery** fails to find true facts. Docs: `papers/CAPSULES.md`, code: `experiments/capsules.py`, bench: `experiments/bench_capsules.py`.
+**Scored capsules v0–v1:** `CAPSULES_NO_GAIN` vs valley (packing/pin-on-exit not enough).
 
-Next if pursuing: pin-on-exit, coverage packing, oracle-online upper bound for discovery vs pack ablation.
+### Oracle-online upper bound (`capsules_20260716T162035Z`)
+
+Perfect discovery stream: always keep critical±R if still in cache + sinks + recent.
+
+| Arm @4k multi-seed 5×3 | @512 | @1024 |
+|------------------------|------|-------|
+| stream_valley | 33% | 67% |
+| **stream_oracle_pin** | **100% (15/15)** | **100% (15/15)** |
+
+**VERDICT: `DISCOVERY_IS_THE_GAP`**
+
+- Peak budget **@512 is sufficient** if neighborhoods are known.  
+- Failures of valley/capsules are **detector failures**, not “stream can’t work.”  
+- Fresh problem: **query-unknown discovery** of H1 neighborhoods.
+
+Docs: `papers/CAPSULES.md` · `prefill_streaming_oracle_pin` in `experiments/capsules.py`.
 
 ---
 

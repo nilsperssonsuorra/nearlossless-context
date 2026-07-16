@@ -35,30 +35,35 @@ This is the design consequence of H1′: the unit of near-lossless memory is a *
 Code: `experiments/capsules.py`  
 Bench: `experiments/bench_capsules.py`
 
-## First multi-seed results (primary @4k, 5×3)
+## Multi-seed results (primary @4k, 5×3)
 
 | Arm | @512 | @1024 | @1536 |
 |-----|------|-------|-------|
-| stream_valley | 33% | **67%** | **93%** |
-| stream_capsules (atomic+fill+sticky) | 33% | 33% | 87% |
+| stream_valley | 33% | 67% | 93% |
+| capsules (scored discovery) | 33% | 33% | 87% |
+| **stream_oracle_pin** (perfect discovery) | **100%** | **100%** | — |
 
-**VERDICT: `CAPSULES_NO_GAIN` (v0)** — atomic packing + sticky registry did **not** beat valley under query-unknown mid-stream scores.
+**VERDICT: `DISCOVERY_IS_THE_GAP`** (`capsules_20260716T162035Z`)
 
-### What we learned (this is still useful)
+- Perfect discovery (force critical±R whenever still in cache) → **15/15** at stream **@512** multi-seed.  
+- Same peak budget where valley is **5/15**.  
+- Oracle retention = 1.0 every cell.  
+- Therefore: **stream peak budget is enough**; **finding** the neighborhood online is not.
 
-1. **Under-filling budget kills you** — pure atomic-only kept ~145 tokens and wasted slots (fixed with fill_remainder).  
-2. **Bottleneck is discovery, not packing** — mid-stream obs windows rarely surface the true fact capsule; sticky pins the *wrong* peaks.  
-3. **Depth=1 is easy** for both (fact in recent). Early/mid depths expose query-unknown failure.  
+### What we learned
 
-### Next experiments (if continuing this line)
+1. Atomic packing / sticky / pin-on-exit **without true facts** cannot beat valley.  
+2. **If discovery were solved, stream@512 would match H1 multi-seed** — huge systems implication.  
+3. Mid-stream attention is a **bad query-unknown detector** on this suite.  
+4. The fresh research target is now precise: **query-unknown fact discovery under peak-KV**, not another packer.
 
-| Idea | Why |
-|------|-----|
-| **Pin-on-exit** | When tokens *leave* the recent window, force a capsule if they ever scored high while local |
-| **Coverage objective** | Maximize #capsules kept under budget, not only top score |
-| **Oracle upper bound online** | If oracle capsules available mid-stream, how good is atomic pack? Isolates discovery vs packing |
-| **Multi-probe scoring** | Score with several windows, not only the last chunk |
+### Next
 
+| Priority | Work |
+|----------|------|
+| **1** | New detector (not last-window attn alone): multi-probe, novelty, entity-ish, small auxiliary model |
+| 2 | Keep oracle_pin as regression upper bound in CI |
+| 3 | Package H1 multi-seed + this gap as paper core narrative |
 ## What would count as a win
 
 - Higher multi-seed success than `seed_valley` at the **same** stream budget, or  

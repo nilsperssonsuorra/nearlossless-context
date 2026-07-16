@@ -375,9 +375,137 @@ def _abs_caps_to_cache(abs_caps: list[FactCapsule], abs_pos: list[int]) -> list[
             continue
         center = pos_to_idx.get(c.center, (lo + hi) // 2)
         out.append(
-            FactCapsule(lo=lo, hi=hi, score=c.score, center=int(center), source="sticky")
+            FactCapsule(lo=lo, hi=hi, score=c.score, center=int(center), source=c.source)
         )
     return out
+
+
+def update_best_scores(
+    best_scores: dict[int, float],
+    score_prefix: torch.Tensor,
+    abs_pos: list[int],
+    prefix_len: int,
+) -> None:
+    """Track best attention mass seen per absolute token while still in cache."""
+    pl = min(int(prefix_len), int(score_prefix.numel()), len(abs_pos))
+    for i in range(pl):
+        a = int(abs_pos[i])
+        s = float(score_prefix[i].item())
+        if s > best_scores.get(a, -1.0):
+            best_scores[a] = s
+
+
+def _components_to_capsules(
+    marked: set[int],
+    best_scores: dict[int, float],
+    *,
+    source: str,
+    score_floor: float = 0.0,
+) -> list[FactCapsule]:
+    if not marked:
+        return []
+    xs = sorted(marked)
+    caps: list[FactCapsule] = []
+    lo = prev = xs[0]
+    for x in xs[1:]:
+        if x <= prev + 1:
+            prev = x
+            continue
+        center = max(range(lo, prev + 1), key=lambda t: best_scores.get(t, 0.0))
+        caps.append(
+            FactCapsule(
+                lo=lo,
+                hi=prev,
+                score=float(best_scores.get(center, score_floor)),
+                center=center,
+                source=source,
+            )
+        )
+        lo = prev = x
+    center = max(range(lo, prev + 1), key=lambda t: best_scores.get(t, 0.0))
+    caps.append(
+        FactCapsule(
+            lo=lo,
+            hi=prev,
+            score=float(best_scores.get(center, score_floor)),
+            center=center,
+            source=source,
+        )
+    )
+    return caps
+
+
+def pin_on_exit_capsules(
+    *,
+    T: int,
+    window_size: int,
+    expand_radius: int,
+    best_scores: dict[int, float],
+    floor_ratio: float = 0.20,
+    max_pins: int = 8,
+) -> list[FactCapsule]:
+    """
+    Pin capsules for absolute tokens that just left the recent window.
+
+    Exit band = [T - 2W, T - W). Tokens here were recently local and are aging
+    out of forced recent keep. Also pin global top historical peaks (any age)
+    so early facts can stick after first compress.
+    """
+    w = max(int(window_size), 1)
+    exit_lo = max(0, T - 2 * w)
+    exit_hi = max(0, T - w)
+    caps: list[FactCapsule] = []
+
+    if exit_hi > exit_lo:
+        vals = [best_scores.get(a, 0.0) for a in range(exit_lo, exit_hi)]
+        gmax = max(vals) if vals else 0.0
+        if gmax > 0:
+            thr = gmax * floor_ratio
+            marked: set[int] = set()
+            ranked = sorted(
+                ((best_scores.get(a, 0.0), a) for a in range(exit_lo, exit_hi)),
+                reverse=True,
+            )
+            n_seed = 0
+            for s, a in ranked:
+                if s < thr:
+                    break
+                for d in range(-expand_radius, expand_radius + 1):
+                    marked.add(a + d)
+                n_seed += 1
+                if n_seed >= max_pins:
+                    break
+            caps.extend(
+                _components_to_capsules(
+                    marked, best_scores, source="pin_exit", score_floor=thr
+                )
+            )
+
+    # Global historical peaks (covers depth=0 facts far from recent)
+    if best_scores:
+        gmax = max(best_scores.values())
+        thr = gmax * max(floor_ratio, 0.25)
+        peaks = sorted(best_scores.items(), key=lambda kv: -kv[1])
+        marked_g: set[int] = set()
+        n_seed = 0
+        last_centers: list[int] = []
+        for a, s in peaks:
+            if s < thr:
+                break
+            if any(abs(a - c) < 2 * expand_radius + 8 for c in last_centers):
+                continue
+            for d in range(-expand_radius, expand_radius + 1):
+                marked_g.add(a + d)
+            last_centers.append(a)
+            n_seed += 1
+            if n_seed >= max_pins:
+                break
+        caps.extend(
+            _components_to_capsules(
+                marked_g, best_scores, source="pin_hist", score_floor=thr
+            )
+        )
+    return caps
 
 
 @torch.inference_mode()
@@ -395,7 +523,15 @@ def compress_past_capsules(
     max_capsules: int = 16,
     abs_pos: list[int] | None = None,
     abs_registry: list[FactCapsule] | None = None,
-) -> tuple[Any, list[int], CapsulePackResult, list[int] | None, list[FactCapsule]]:
+    best_scores: dict[int, float] | None = None,
+) -> tuple[
+    Any,
+    list[int],
+    CapsulePackResult,
+    list[int] | None,
+    list[FactCapsule],
+    dict[int, float],
+]:
     from bench_h1_oracle import compress_keep_indices
     from scorer_valley import aggregate_prefix_vote, obs_attentions_on_past
     from snapkv import cache_seq_len, full_layer_h_kv
@@ -403,6 +539,7 @@ def compress_past_capsules(
     T = int(input_ids_so_far.shape[-1])
     S = cache_seq_len(past)
     registry = list(abs_registry or [])
+    best_scores = dict(best_scores or {})
 
     if S <= budget:
         keep = list(range(S))
@@ -415,7 +552,7 @@ def compress_past_capsules(
             n_tokens_capsules=0,
             notes=["under budget"],
         )
-        return past, keep, pack, abs_pos, registry
+        return past, keep, pack, abs_pos, registry, best_scores
 
     window_size = min(window_size, T - 1, S - 1)
     if window_size < 1:
@@ -428,7 +565,7 @@ def compress_past_capsules(
             budget=budget,
             n_tokens_capsules=0,
         )
-        return past, keep, pack, abs_pos, registry
+        return past, keep, pack, abs_pos, registry, best_scores
 
     obs_ids = input_ids_so_far[:, -window_size:]
     abs_obs_start = T - window_size
@@ -449,7 +586,7 @@ def compress_past_capsules(
             n_tokens_capsules=0,
             notes=["no attentions"],
         )
-        return past, keep, pack, abs_pos, registry
+        return past, keep, pack, abs_pos, registry, best_scores
 
     h_kv = full_layer_h_kv(past)
     score = aggregate_prefix_vote(
@@ -469,6 +606,8 @@ def compress_past_capsules(
     )
 
     if abs_pos is not None and len(abs_pos) == S:
+        update_best_scores(best_scores, score, abs_pos, prefix_len)
+        # Peak-based sticky discovers
         new_abs = []
         for c in new_cache_caps:
             alo = abs_pos[c.lo]
@@ -483,18 +622,35 @@ def compress_past_capsules(
                     source="score",
                 )
             )
+        # Pin-on-exit: force capsules for high-score tokens leaving recent band
+        pin_caps = pin_on_exit_capsules(
+            T=T,
+            window_size=window_size,
+            expand_radius=expand_radius,
+            best_scores=best_scores,
+            floor_ratio=0.18,
+            max_pins=max_capsules,
+        )
         registry = _merge_abs_registry(registry, new_abs, min_sep=min_sep)
+        registry = _merge_abs_registry(registry, pin_caps, min_sep=min_sep)
+
         sticky_cache = _abs_caps_to_cache(registry, abs_pos)
-        boosted = [
-            FactCapsule(
-                lo=c.lo,
-                hi=c.hi,
-                score=c.score * (1.25 if c.source == "sticky" else 1.0),
-                center=c.center,
-                source=c.source,
+        boosted = []
+        for c in sticky_cache:
+            mult = 1.0
+            if c.source in ("pin_exit", "pin_hist"):
+                mult = 1.75
+            elif c.source == "sticky":
+                mult = 1.25
+            boosted.append(
+                FactCapsule(
+                    lo=c.lo,
+                    hi=c.hi,
+                    score=c.score * mult,
+                    center=c.center,
+                    source=c.source,
+                )
             )
-            for c in sticky_cache
-        ]
         for c in new_cache_caps:
             if not any(c.overlaps(s) for s in boosted):
                 boosted.append(c)
@@ -508,7 +664,10 @@ def compress_past_capsules(
             prefix_len=prefix_len,
             fill_remainder=True,
         )
-        pack.notes = list(pack.notes) + [f"sticky_registry={len(registry)}"]
+        pack.notes = list(pack.notes) + [
+            f"sticky_registry={len(registry)}",
+            f"pin_exit_new={len(pin_caps)}",
+        ]
         keep = pack.keep
     else:
         keep, pack = select_keep_capsules(
@@ -529,7 +688,7 @@ def compress_past_capsules(
         abs_pos = [abs_pos[i] for i in keep]
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    return past, keep, pack, abs_pos, registry
+    return past, keep, pack, abs_pos, registry, best_scores
 
 
 @torch.inference_mode()
@@ -547,7 +706,12 @@ def prefill_streaming_capsules(
     min_sep: int = 64,
     max_capsules: int = 16,
 ) -> tuple[Any, torch.Tensor, dict]:
-    """Chunked prefill with atomic + sticky absolute capsules (query-unknown)."""
+    """
+    Chunked prefill with atomic capsules + sticky registry + pin-on-exit.
+
+    Pin-on-exit: tokens that leave the recent window with high historical score
+    become permanent absolute capsules (query-unknown fact memory).
+    """
     from snapkv import cache_seq_len
 
     dyn_budget = int(stream_budget)
@@ -564,6 +728,7 @@ def prefill_streaming_capsules(
     last_pack: CapsulePackResult | None = None
     abs_pos: list[int] = []
     abs_registry: list[FactCapsule] = []
+    best_scores: dict[int, float] = {}
 
     for start in range(0, seq_len, chunk_size):
         end = min(start + chunk_size, seq_len)
@@ -593,7 +758,7 @@ def prefill_streaming_capsules(
         peak_cache = max(peak_cache, S_now)
 
         if past is not None and S_now > dyn_budget:
-            past, keep, pack, abs_pos, abs_registry = compress_past_capsules(
+            past, keep, pack, abs_pos, abs_registry, best_scores = compress_past_capsules(
                 model,
                 input_ids[:, :end],
                 past,
@@ -606,6 +771,7 @@ def prefill_streaming_capsules(
                 max_capsules=max_capsules,
                 abs_pos=abs_pos,
                 abs_registry=abs_registry,
+                best_scores=best_scores,
             )
             n_compress += 1
             n_caps_kept += len(pack.capsules_kept)
@@ -615,7 +781,7 @@ def prefill_streaming_capsules(
 
     assert past is not None and last_logits is not None
     if cache_seq_len(past) > final_budget:
-        past, keep, pack, abs_pos, abs_registry = compress_past_capsules(
+        past, keep, pack, abs_pos, abs_registry, best_scores = compress_past_capsules(
             model,
             input_ids,
             past,
@@ -628,14 +794,16 @@ def prefill_streaming_capsules(
             max_capsules=max_capsules,
             abs_pos=abs_pos,
             abs_registry=abs_registry,
+            best_scores=best_scores,
         )
         n_compress += 1
         n_caps_kept += len(pack.capsules_kept)
         n_caps_dropped += len(pack.capsules_dropped)
         last_pack = pack
 
+    n_pin = sum(1 for c in abs_registry if c.source == "pin_exit")
     stats = {
-        "path": "stream_capsules_sticky",
+        "path": "stream_capsules_pin_exit",
         "stream_budget": dyn_budget,
         "final_budget": final_budget,
         "peak_cache": peak_cache,
@@ -644,6 +812,8 @@ def prefill_streaming_capsules(
         "n_caps_kept_events": n_caps_kept,
         "n_caps_dropped_events": n_caps_dropped,
         "sticky_registry_size": len(abs_registry),
+        "n_pin_exit_in_registry": n_pin,
+        "n_best_score_tokens": len(best_scores),
         "last_pack": {
             "n_kept": len(last_pack.capsules_kept) if last_pack else 0,
             "n_dropped": len(last_pack.capsules_dropped) if last_pack else 0,
@@ -652,5 +822,133 @@ def prefill_streaming_capsules(
         },
         "expand_radius": expand_radius,
         "min_sep": min_sep,
+    }
+    return past, last_logits, stats
+
+
+@torch.inference_mode()
+def prefill_streaming_oracle_pin(
+    model,
+    input_ids: torch.Tensor,
+    *,
+    critical: list[int],
+    stream_budget: int,
+    final_budget: int | None = None,
+    chunk_size: int = 512,
+    window_size: int = 128,
+    sinks: int = 8,
+    expand_radius: int = 1,
+) -> tuple[Any, torch.Tensor, dict]:
+    """
+    Query-unknown stream upper bound with *perfect discovery*.
+
+    At each compress: force sinks + recent + any critical±R still in the cache
+    (absolute positions), then fill remaining budget with lowest cache indices
+    still free (stable, non-attn fill). Isolates packing/retention from scoring.
+
+    If this succeeds multi-seed where scored capsules fail → discovery is the gap.
+    If this also fails → stream peak budget / RoPE/layout issues dominate.
+    """
+    from bench_h1_oracle import compress_keep_indices
+    from snapkv import cache_seq_len
+
+    dyn_budget = int(stream_budget)
+    final_budget = int(final_budget if final_budget is not None else dyn_budget)
+    seq_len = int(input_ids.shape[-1])
+    device = input_ids.device
+    past = None
+    last_logits = None
+    chunk_size = max(int(chunk_size), 1)
+    peak_cache = 0
+    n_compress = 0
+    abs_pos: list[int] = []
+
+    oracle_abs: set[int] = set()
+    for c in critical:
+        for d in range(-int(expand_radius), int(expand_radius) + 1):
+            j = int(c) + d
+            if 0 <= j < seq_len:
+                oracle_abs.add(j)
+
+    def _compress(past_kv, abs_list: list[int], budget: int) -> tuple[Any, list[int]]:
+        S = cache_seq_len(past_kv)
+        if S <= budget:
+            return past_kv, abs_list
+        recent = list(range(max(0, S - window_size), S))
+        sink_idx = list(range(min(sinks, S)))
+        # Priority: oracle caps still present, then sinks, then recent
+        keep: list[int] = []
+        seen: set[int] = set()
+        for i, a in enumerate(abs_list):
+            if a in oracle_abs and i not in seen:
+                keep.append(i)
+                seen.add(i)
+        for i in sink_idx + recent:
+            if i not in seen and 0 <= i < S:
+                keep.append(i)
+                seen.add(i)
+        # Fill remaining
+        for i in range(S):
+            if len(keep) >= budget:
+                break
+            if i not in seen:
+                keep.append(i)
+                seen.add(i)
+        keep = sorted(keep[:budget])
+        past_kv = compress_keep_indices(past_kv, keep)
+        abs_list = [abs_list[i] for i in keep]
+        return past_kv, abs_list
+
+    for start in range(0, seq_len, chunk_size):
+        end = min(start + chunk_size, seq_len)
+        chunk = input_ids[:, start:end]
+        pos = torch.arange(start, end, device=device, dtype=torch.long).unsqueeze(0)
+        kwargs: dict[str, Any] = {
+            "input_ids": chunk,
+            "use_cache": True,
+            "position_ids": pos,
+        }
+        if past is not None:
+            kwargs["past_key_values"] = past
+            kwargs["cache_position"] = pos.squeeze(0)
+        try:
+            out = model(**kwargs)
+        except TypeError:
+            kwargs.pop("cache_position", None)
+            out = model(**kwargs)
+        past = out.past_key_values
+        last_logits = out.logits[:, -1, :]
+        del out
+
+        abs_pos.extend(range(start, end))
+        S_now = cache_seq_len(past)
+        if len(abs_pos) > S_now:
+            abs_pos = abs_pos[-S_now:]
+        peak_cache = max(peak_cache, S_now)
+
+        if past is not None and S_now > dyn_budget:
+            past, abs_pos = _compress(past, abs_pos, dyn_budget)
+            n_compress += 1
+            peak_cache = max(peak_cache, cache_seq_len(past))
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+    assert past is not None and last_logits is not None
+    if cache_seq_len(past) > final_budget:
+        past, abs_pos = _compress(past, abs_pos, final_budget)
+        n_compress += 1
+
+    # How many oracle abs still present?
+    still = sum(1 for a in abs_pos if a in oracle_abs)
+    stats = {
+        "path": "stream_oracle_pin",
+        "stream_budget": dyn_budget,
+        "final_budget": final_budget,
+        "peak_cache": peak_cache,
+        "final_cache": cache_seq_len(past),
+        "n_compress": n_compress,
+        "n_oracle_abs": len(oracle_abs),
+        "n_oracle_still_in_cache": still,
+        "oracle_retention": round(still / max(len(oracle_abs), 1), 4),
     }
     return past, last_logits, stats

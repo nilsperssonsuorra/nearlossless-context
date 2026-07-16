@@ -58,15 +58,15 @@ Depth 0 hardest (often 192); end-depth often 155.
 
 Posthoc compress still peaks at full prefill KV. **Online** compress after chunks caps peak cache ≈ stream_budget + chunk.
 
-**Multi-seed correction @4k:** stream@512 is **not** robust (33%); use **stream@1536 (~93%)**.
+**Multi-seed @4k:** scored stream@512 is **not** robust (33%); stream@1536 ~93%.
 
-| Setting | Multi-seed @4k (5×3) | Long-\(L\) (prior, less seed variance) |
-|---------|----------------------|----------------------------------------|
-| full comfortable | peak =L | — |
-| stream@512 | **33%** | overstated if assumed 100% |
-| stream@1024 | 67% | — |
-| stream@1536 | **93%** | ~24k reliable class (prior) |
-| stream@2048 | (not re-run) | mid stable ≥28k (prior) |
+**Critical upper bound:** with *perfect discovery* (oracle pin of critical±R online), stream@**512** is **15/15** multi-seed — same peak budget where scored methods fail. So the systems limit is **not** peak cache; it is **query-unknown discovery**.
+
+| Setting | Multi-seed @4k (5×3) |
+|---------|----------------------|
+| stream_valley@512 | 33% |
+| stream_oracle_pin@512 | **100%** |
+| stream_valley@1536 | ~93% |
 
 ## 6. Transfer
 

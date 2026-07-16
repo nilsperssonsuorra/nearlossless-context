@@ -79,13 +79,15 @@ See `USAGE.md` and `results/FINDINGS.md`.
 
 Draft: `papers/PAPER_DRAFT.md` · `experiments/bench_paper_rigor.py`
 
-## Fresh line: fact capsules (query-unknown)
+## Fresh line: query-unknown discovery (capsules)
 
-Atomic neighborhood objects + sticky absolute registry for stream compress.  
-**First multi-seed result:** no gain vs seed_valley (discovery fails mid-stream). See `papers/CAPSULES.md`.
+Atomic neighborhoods + sticky/pin-on-exit: **no gain** vs valley when discovery is scored.
+
+**Oracle-online stream@512:** **15/15** multi-seed (valley 5/15) → **`DISCOVERY_IS_THE_GAP`**.  
+Peak KV is fine; finding facts without the question is the unsolved piece.
 
 ## Next
 
-1. Capsule **pin-on-exit** / better query-unknown discovery — or kill the line cleanly  
-2. Finish `papers/PAPER_DRAFT.md` + figure for H1 multi-seed (already solid)  
+1. **Query-unknown detector** (replace mid-stream attn) — main research bet  
+2. Finish `papers/PAPER_DRAFT.md` around H1 + discovery gap  
 3. Multi-seed transfer slice  
