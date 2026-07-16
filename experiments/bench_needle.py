@@ -46,6 +46,26 @@ FILLER = (
     "Routine status log: sensors nominal, telemetry within range, no anomalies detected. "
     "Maintenance checklist item completed; continue standard operations as scheduled. "
 )
+# Alternate fillers for multi-seed variance (same style, different surface form).
+FILLER_VARIANTS = [
+    FILLER,
+    (
+        "Ops bulletin: all channels green, payload thermal envelope stable, no alerts raised. "
+        "Crew completed the scheduled walkthrough; resume baseline procedure as planned. "
+    ),
+    (
+        "Shift summary: environmental controls within spec, link budget adequate, idle. "
+        "Checklist step signed off; maintain standard watchstanding until further notice. "
+    ),
+    (
+        "Facility memo: power rails nominal, cooling loops steady, diagnostics clean. "
+        "Preventive task finished on time; continue ordinary operations without change. "
+    ),
+    (
+        "Night report: sensor suite quiet, navigation fix accepted, no exceptions logged. "
+        "Routine maintenance closed; keep following the published runbook for this sector. "
+    ),
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -65,22 +85,41 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def build_needle_prompt(tokenizer, target_tokens: int, depth: float) -> str:
-    """depth=0 → needle near start; 1 → near end (before question)."""
+def build_needle_prompt(
+    tokenizer,
+    target_tokens: int,
+    depth: float,
+    *,
+    seed: int | None = None,
+) -> str:
+    """depth=0 → needle near start; 1 → near end (before question).
+
+    seed: if set, rotate filler variants for multi-seed rigor (same task, different hay).
+    """
+    import random
+
     depth = max(0.0, min(1.0, depth))
     # Grow filler then insert needle; append question at end (obs window)
     body_budget = max(target_tokens - 128, 256)
     chunks: list[str] = []
+    rng = random.Random(seed) if seed is not None else None
     while True:
         text_try = "".join(chunks)
         n = len(tokenizer.encode(text_try, add_special_tokens=False))
         if n >= body_budget:
             break
-        chunks.append(FILLER)
+        if rng is None:
+            chunks.append(FILLER)
+        else:
+            chunks.append(rng.choice(FILLER_VARIANTS))
 
     hay = "".join(chunks)
     # Insert needle at character position ≈ depth * len
     pos = int(depth * max(len(hay) - 1, 0))
+    # Optional small seed-dependent jitter so depth is not character-identical across seeds
+    if rng is not None and len(hay) > 64:
+        jitter = rng.randint(-32, 32)
+        pos = max(0, min(len(hay) - 1, pos + jitter))
     # snap to sentence boundary-ish
     pos = hay.rfind(" ", 0, pos + 1)
     if pos < 0:

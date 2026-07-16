@@ -8,6 +8,63 @@
 
 ---
 
+## Multi-seed paper rigor (`paper_rigor_20260716T120146Z` + stream sweep)
+
+**Protocol:** 5 seeds × depths {0, 0.5, 1.0} = **15 cells**; seeded filler variants (`build_needle_prompt(..., seed=)`); primary Qwen3-4B @4k.
+
+### A) H1 mechanism — **locked**
+
+| Arm | Success | Rate |
+|-----|---------|------|
+| full | 15/15 | **100%** |
+| oracle_r1 (crit±1) | 15/15 | **100%** |
+| anti_oracle | 0/15 | **0%** |
+
+**VERDICT: `H1_MULTI_SEED_OK`** — necessity + sufficiency hold under hay variation. Mean |oracle| ≈ **149** tokens (155 mid/start, 136 end).
+
+### B) Scorer tax (seed_valley vs oracle)
+
+| Metric | Value |
+|--------|-------|
+| Mean min budget with ε=0 (per cell) | **172** |
+| Min budget with ε=0 on **all** 15 cells | **192** |
+| Mean tax \(B_{\min}/\|K_{\mathrm{oracle}}\|\) | **~1.16×** (global-all **~1.24×** at 192) |
+| @176 mean Jaccard vs oracle keep | **0.83** |
+| @176 mean tokens kept outside oracle | **~29** |
+
+Depth **0.0** is hardest for the scorer (often needs 192); depth 1.0 often ok at 155 (fact already near recent).
+
+### C) Stream multi-seed (corrects earlier single-hay optimism)
+
+| Stream budget | Rate (15 cells) | By depth (0 / 0.5 / 1.0) |
+|---------------|-----------------|---------------------------|
+| 512 | **33%** (5/15) | 0 / 0 / 1.0 |
+| 768 | 40% | 0 / 0.2 / 1.0 |
+| 1024 | 67% | 0.2 / 0.8 / 1.0 |
+| **1536** | **93%** (14/15) | 0.8 / 1.0 / 1.0 |
+
+Earlier FINDINGS “stream@512 all depths @4k” used **fixed filler** (no seed). Under multi-seed hay, **stream@1536** is the honest ε≈0 operating point at 4k. Long-\(L\) stream@1536–2048 results remain the systems story for \(L_\varepsilon\).
+
+**Paper draft:** `papers/PAPER_DRAFT.md` · bench: `experiments/bench_paper_rigor.py`
+
+---
+
+## Fact capsules (new direction, 2026-07-16)
+
+**Idea:** compress *atomic neighborhoods* (H1′ objects) under **query-unknown** streaming; sticky absolute registry pins mid-stream peaks.
+
+| stream budget | valley | capsules (atomic+fill+sticky) |
+|---------------|--------|-------------------------------|
+| 512 | 33% | 33% |
+| 1024 | **67%** | 33% |
+| 1536 | **93%** | 87% |
+
+**VERDICT: `CAPSULES_NO_GAIN` (v0)** — packing/atomicity is not the bottleneck; **mid-stream discovery** fails to find true facts. Docs: `papers/CAPSULES.md`, code: `experiments/capsules.py`, bench: `experiments/bench_capsules.py`.
+
+Next if pursuing: pin-on-exit, coverage packing, oracle-online upper bound for discovery vs pack ablation.
+
+---
+
 ## H1 kill experiment (`h1_oracle_20260713T214610Z`)
 
 | Arm | Success | Meaning |

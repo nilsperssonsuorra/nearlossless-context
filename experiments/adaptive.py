@@ -166,19 +166,22 @@ def policy_for(
         )
     # Single needle: scale stream budget with L
     elif L <= 4096:
+        # Multi-seed rigor (5×3): stream@512 only ~33%; @1536 ~93% all depths.
+        # Posthoc seed_valley global min budget with ε=0: 192 (~1.24× oracle).
         pol = AdaptivePolicy(
             R=1,
-            budget=176,
-            stream_budget=512 if prefer_stream else 176,
-            note="single @4k: posthoc@176 / stream@512",
+            budget=192,
+            stream_budget=1536 if prefer_stream else 192,
+            note="single @4k: posthoc@192 (multi-seed) / stream@1536 (multi-seed)",
         )
     elif L <= 8192:
         pol = AdaptivePolicy(
             R=1,
-            budget=176,
-            stream_budget=512,
-            note="single @8k stream@512",
+            budget=192,
+            stream_budget=1536,
+            note="single @8k stream@1536 (multi-seed robust)",
         )
+
     elif L <= 12288:
         pol = AdaptivePolicy(
             R=1,

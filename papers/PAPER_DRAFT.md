@@ -1,0 +1,108 @@
+# Near-Lossless Long Context under Fixed VRAM via Critical-Span Retention
+
+**Status:** draft skeleton for portfolio / possible workshop note  
+**Lab:** RTX 3090 24 GB · primary `Qwen/Qwen3-4B-Instruct-2507`  
+**Repo:** nearlossless-context (private)  
+**Last updated:** 2026-07-16
+
+> Numbers from `results/paper_rigor_20260716T120146Z` (5 seeds × 3 depths) unless noted.
+
+---
+
+## Abstract (draft)
+
+Long-context inference is limited by KV cache memory. Training-free token eviction methods reduce cache size, but it is unclear *which* tokens are necessary for near–full-KV quality. On a multi-seed controlled retrieval suite (5×3 cells, Qwen3-4B), we show that **retaining critical fact tokens plus a small local radius** \(R^*=1\) (with sinks and a recent/question window) is necessary and sufficient for ε≈0 quality—**15/15** oracle success, **0/15** anti-oracle—while full KV is **15/15**. A non-oracle attention scorer (`seed_valley`) matches ε=0 at **192** tokens on all cells (~**1.24×** mean oracle size ~149; mean per-cell tax ~**1.16×**). Online streaming needs a **larger** budget under hay variation than single-prompt smokes suggested (**stream@1536 ≈ 93%** vs **stream@512 ≈ 33%** at 4k); with adequate stream budgets, peak cache stays far below full \(L\), enabling multi-10k contexts on a 24 GB GPU. The critical-span mechanism **transfers** across Qwen3, Qwen2.5, Llama-3.2, and hybrid Gemma-4 (full layers). Limitations: needle-class suite; residual scorer tax; stream ≫ posthoc budgets.
+
+---
+
+## 1. Introduction
+
+- **Problem:** KV scales with \(L\); local 24 GB forces short comfortable contexts.
+- **Goal:** maximize \(L_\varepsilon = \max\{L : Q(M,L) \ge (1-\varepsilon) Q(\mathrm{Full},L)\}\) under peak VRAM / peak cache constraints; ε=0 on retrieval-critical tasks.
+- **Claim:** near-lossless training-free compression is closer to **guarantee critical local neighborhoods** than to uniform thinning or pure quantization.
+
+## 2. Related work (sketch)
+
+- KV eviction / SnapKV / H2O / pyramid / hybrid attention (Gemma-style sliding+full).
+- Quantization (KIVI, etc.) — complementary; we use fake-int8 only for byte accounting.
+- **Positioning:** mechanism study + systems \(L_\varepsilon\) on a fixed workstation, not a new SOTA leaderboard chase.
+
+## 3. Hypothesis H1 / H1′
+
+**Necessity:** Dropping tokens that encode the fact → retrieval fails (ε=0).  
+**Sufficiency (H1′):** sinks ∪ critical±\(R^*\) ∪ recent/question window restores full-KV success; bare critical tokens without radius often corrupt the fact (e.g. trailing digit).
+
+**Kill protocol:** full / oracle_r1 / anti_oracle / recent.
+
+| Result (5×3 multi-seed @4k) | Rate |
+|-----------------------------|------|
+| full | **15/15 (100%)** |
+| oracle_r1 | **15/15 (100%)** |
+| anti_oracle | **0/15 (0%)** |
+
+\(R^*=1\); mean |oracle| ≈ 149 tokens (~155 start/mid, ~136 end) vs full ~4k.
+
+## 4. Scorer tax
+
+Without oracle labels, `seed_valley` (shared attention scores → seeds → contiguous valley + ±R) targets the oracle set.
+
+| Method | \(B_{\min}\) all cells | Mean per-cell \(B_{\min}\) | Tax vs mean \|oracle\| |
+|--------|------------------------|----------------------------|-------------------------|
+| oracle_r1 | ~149 (exact set) | — | **1.0×** |
+| seed_valley | **192** | **172** | **~1.24×** global / **~1.16×** mean |
+| @176 Jaccard vs oracle | — | 0.83 | ~29 extra non-oracle tokens |
+
+Depth 0 hardest (often 192); end-depth often 155.
+
+## 5. Systems: streaming \(L_\varepsilon\)
+
+Posthoc compress still peaks at full prefill KV. **Online** compress after chunks caps peak cache ≈ stream_budget + chunk.
+
+**Multi-seed correction @4k:** stream@512 is **not** robust (33%); use **stream@1536 (~93%)**.
+
+| Setting | Multi-seed @4k (5×3) | Long-\(L\) (prior, less seed variance) |
+|---------|----------------------|----------------------------------------|
+| full comfortable | peak =L | — |
+| stream@512 | **33%** | overstated if assumed 100% |
+| stream@1024 | 67% | — |
+| stream@1536 | **93%** | ~24k reliable class (prior) |
+| stream@2048 | (not re-run) | mid stable ≥28k (prior) |
+
+## 6. Transfer
+
+| Model | H1 | Stream (4k mid) | Posthoc min |
+|-------|----|-----------------|-------------|
+| Qwen3-4B | holds | 512 | ~176 |
+| Qwen2.5-3B | holds | 512 (768@8k) | ~320 |
+| Llama-3.2-3B | holds | 512 | ~256 |
+| Gemma-4 E4B hybrid | holds (full layers) | 1024 R=2 | ~176 |
+
+Hybrid lesson: compress full layers only; score-pass must keep sliding `cumulative_length` as absolute prefix (HF `q_offset` from layer 0).
+
+## 7. Adaptive policy
+
+`prefill_auto`: L-based schedule + optional entity estimate + **per-model floors** (Gemma stream≥1024 R≥2, etc.).
+
+## 8. Limitations
+
+1. Needle / multi-needle suite — not general long-context benchmarks (RULER, LongBench, …).  
+2. Residual scorer tax; stream ≠ oracle-tight.  
+3. Fake int8 logical bytes, not production kernels.  
+4. Multi-seed N still modest for formal claims.  
+5. Generation uses greedy decode; template sensitivity possible.
+
+## 9. Conclusion
+
+Critical-span retention with small local radius is a **necessary structure** for near-lossless training-free KV compression on retrieval tasks; non-oracle scorers approximate it with small tax; streaming raises practical \(L_\varepsilon\) under 24 GB; the mechanism transfers across families including hybrid models.
+
+---
+
+## Reproducibility
+
+```text
+python experiments/bench_paper_rigor.py --seeds 0,1,2,3,4 --ctx 4096
+python experiments/bench_transfer.py --model <id>
+python experiments/bench_adaptive_e2e.py
+```
+
+Primary: `Qwen/Qwen3-4B-Instruct-2507`, transformers + CUDA bf16, RTX 3090.

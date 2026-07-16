@@ -44,10 +44,10 @@ toks = greedy_generate(
 
 | Target L | Recommended | Notes |
 |----------|-------------|--------|
-| ≤ 4k | `stream` or `posthoc` | posthoc@176 tiny decode KV |
-| ≤ 8k | `stream` (auto → 512) | comfortable |
-| ≤ 24k | `stream` (auto → **1536**) | **reliable** peak ~2k / ~9 GB |
-| ≤ 40k | `stream` (auto → **2048** if L≥28k) | reliable long single-needle |
+| ≤ 4k | `stream` or `posthoc` | multi-seed: posthoc **@192**; stream **@1536** (not 512) |
+| ≤ 8k | `stream` (auto → **1536**) | multi-seed robust |
+| ≤ 24k | `stream` (auto → **1536**) | peak ~2k / ~9 GB |
+| ≤ 40k | `stream` (auto → **2048** if L≥28k) | long single-needle |
 | Multi-secret | `stream` (auto-raise or `safe_multi=True`) | mid-stream peak probe can raise budget |
 
 ## Do not

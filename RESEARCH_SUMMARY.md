@@ -18,8 +18,8 @@
 | Setting | Outcome |
 |---------|---------|
 | Posthoc seed_valley @176 | ~40× smaller decode KV @8k mid |
-| Stream @512 | \(L_\varepsilon=8\mathrm{k}\) all depths |
-| Stream @1536 | Reliable **~24k**; observed **≥40k** single-needle; peak cache ~2k, VRAM ~9 GB |
+| Stream @512 | **Not multi-seed robust @4k (33%)** — depth=1 only |
+| Stream @1536 | Multi-seed **~93% @4k**; long-\(L\) reliable **~24k** class; peak ~2k / ~9 GB |
 | Stream ≥28k mid | Prefer **@2048** (mid can flake at 1536) |
 | Multi-needle | Posthoc R=8@384; stream R=8@1024 |
 | 3-hop + distractors | Supported with multi schedule; stream L-only can return wrong secret |
@@ -69,8 +69,23 @@ See `USAGE.md` and `results/FINDINGS.md`.
 - **Qwen2.5** posthoc ≥320; stream ≥768 @ L≥8k  
 - **Llama-3.2** posthoc ≥256  
 
+## Multi-seed rigor (primary @4k, 5×3)
+
+| Claim | Result |
+|-------|--------|
+| H1 full / oracle / anti | **15/15 / 15/15 / 0/15** |
+| seed_valley all-cell \(B_{\min}\) | **192** (~1.24× oracle) |
+| stream@1536 | **14/15** |
+
+Draft: `papers/PAPER_DRAFT.md` · `experiments/bench_paper_rigor.py`
+
+## Fresh line: fact capsules (query-unknown)
+
+Atomic neighborhood objects + sticky absolute registry for stream compress.  
+**First multi-seed result:** no gain vs seed_valley (discovery fails mid-stream). See `papers/CAPSULES.md`.
+
 ## Next
 
-1. Residual scorer tax → oracle (primary)  
-2. Public note / blog with tables above  
-3. Optional: true int8 kernels / multi-seed transfer variance  
+1. Capsule **pin-on-exit** / better query-unknown discovery — or kill the line cleanly  
+2. Finish `papers/PAPER_DRAFT.md` + figure for H1 multi-seed (already solid)  
+3. Multi-seed transfer slice  
