@@ -70,8 +70,8 @@ Bench: `experiments/bench_capsules.py`
 | Priority | Work |
 |----------|------|
 | 1 | ~~Sticky multi-seed ≥24k–40k~~ **done** — 9/9 @512 through **40k** |
-| 2 | Optional fusion / NL residual; multi-hop under sticky novelty |
-| 3 | ~~Hybrid Gemma-4 novelty transfer~~ **done** — 9/9 @512 multi-seed @4k |
+| 2 | ~~Paper narrative + fig + limitations~~ **done** — `PAPER_DRAFT.md`, `figures/fig1_story.png` |
+| 3 | Multi-entity packing / multi-hop under sticky novelty; optional external bench slice |
 ## What would count as a win
 
 - Higher multi-seed success than `seed_valley` at the **same** stream budget, or  

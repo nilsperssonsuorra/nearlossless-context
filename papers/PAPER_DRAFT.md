@@ -1,123 +1,167 @@
 # Near-Lossless Long Context under Fixed VRAM via Critical-Span Retention
 
-**Status:** draft skeleton for portfolio / possible workshop note  
+**Status:** portfolio / workshop-style draft (narrative + figure)  
 **Lab:** RTX 3090 24 GB · primary `Qwen/Qwen3-4B-Instruct-2507`  
-**Repo:** nearlossless-context (private)  
-**Last updated:** 2026-07-16
+**Repo:** nearlossless-context  
+**Last updated:** 2026-07-16  
 
-> Numbers from `results/paper_rigor_20260716T120146Z` (5 seeds × 3 depths) unless noted.
+> Primary multi-seed tables: `results/paper_rigor_*`, `novelty_*`, `FINDINGS.md`.  
+> **Figure:** [`figures/fig1_story.png`](figures/fig1_story.png) (regenerate: `python experiments/plot_paper_figures.py`).
 
 ---
 
-## Abstract (draft)
+## Abstract
 
-Long-context inference is limited by KV cache memory. Training-free token eviction methods reduce cache size, but it is unclear *which* tokens are necessary for near–full-KV quality. On a multi-seed controlled retrieval suite (5×3 cells, Qwen3-4B), we show that **retaining critical fact tokens plus a small local radius** \(R^*=1\) (with sinks and a recent/question window) is necessary and sufficient for ε≈0 quality—**15/15** oracle success, **0/15** anti-oracle—while full KV is **15/15**. A non-oracle attention scorer (`seed_valley`) matches ε=0 at **192** tokens on all cells (~**1.24×** mean oracle size ~149; mean per-cell tax ~**1.16×**). Under online streaming, multi-seed hay exposes a **query-unknown discovery gap**: attention stream@512 is only **33%** at 4k while perfect online pin of critical±R is **15/15** at the same peak budget. A **surface novelty detector** (rarity + digit/ID-like cues, no question) with **sticky pin packing** closes most of that gap (**93%** multi-seed@4k; **100%** sticky multi-seed 3×3 through **40k**) at peak cache **~1k** tokens—where valley often still needs **~2k** or fails. The critical-span mechanism **transfers** across Qwen3, Qwen2.5, Llama-3.2, and hybrid Gemma-4 (full layers). Limitations: needle-class suite; residual scorer tax; novelty aligned with structured secrets; modest multi-seed \(N\).
+Long-context inference is limited by KV-cache memory. Training-free eviction methods shrink the cache, but it is often unclear *which* tokens are necessary for near–full-KV quality. On a multi-seed controlled retrieval suite (Qwen3-4B, RTX 3090), we show three linked results:
+
+1. **Structure (H1′).** Retaining critical fact tokens plus a small local radius \(R^*=1\) (with attention sinks and a recent/question window) is **necessary and sufficient** for ε≈0 single-fact recall: oracle **15/15**, anti-oracle **0/15**, full KV **15/15** (5 seeds × 3 depths @4k).
+2. **Discovery gap.** Online streaming at a moderate peak budget fails under multi-seed hay not because the budget is too small, but because **query-unknown discovery is weak**: attention stream@512 is **33%**, while perfect online pin of critical±R is **15/15** at the same peak.
+3. **Closing the gap.** A **surface novelty detector** (within-prefix rarity + digit/ID-like cues; no final question) with **sticky pin packing** reaches **~93%** multi-seed @4k and **100%** (3×3) through **40k** at stream@512—peak cache **~1k tokens**, flat in \(L\).
+
+The critical-span mechanism transfers across Qwen2.5, Llama-3.2, and hybrid Gemma-4 (full layers). We do **not** claim general long-context SOTA; see §Limitations.
 
 ---
 
 ## 1. Introduction
 
-- **Problem:** KV scales with \(L\); local 24 GB forces short comfortable contexts.
-- **Goal:** maximize \(L_\varepsilon = \max\{L : Q(M,L) \ge (1-\varepsilon) Q(\mathrm{Full},L)\}\) under peak VRAM / peak cache constraints; ε=0 on retrieval-critical tasks.
-- **Claim:** near-lossless training-free compression is closer to **guarantee critical local neighborhoods** than to uniform thinning or pure quantization.
+KV cache memory grows with context length \(L\). On a fixed workstation (here: 24 GB), full-cache decode becomes the bottleneck long before “the model cannot attend.” Training-free compressors (observation-window scoring, recent-only eviction, SnapKV-style selection) reduce tokens kept, but practice often optimizes average scores rather than **guaranteeing** the spans that encode answers.
+
+We study **near-lossless** compression on retrieval-critical prompts: quality \(Q\) should match full KV at ε≈0 under a multi-seed protocol. The systems objective is
+
+\[
+L_\varepsilon \;=\; \max\{\, L : Q(M,L) \ge (1-\varepsilon)\,Q(\mathrm{Full},L) \,\}
+\]
+
+under **peak** cache / VRAM constraints—not only final decode size after a full prefill.
+
+**Claim.** Near-lossless training-free KV compression is better understood as **retaining critical local neighborhoods** (and discovering them online before the question exists) than as uniform thinning or posthoc score ranking alone.
+
+---
 
 ## 2. Related work (sketch)
 
-- KV eviction / SnapKV / H2O / pyramid / hybrid attention (Gemma-style sliding+full).
-- Quantization (KIVI, etc.) — complementary; we use fake-int8 only for byte accounting.
-- **Positioning:** mechanism study + systems \(L_\varepsilon\) on a fixed workstation, not a new SOTA leaderboard chase.
+- **Eviction / selection:** H2O, SnapKV, pyramid and related training-free keepers.  
+- **Hybrid attention:** sliding-window + full layers (e.g. Gemma-4); full-layer KV still dominates compressible state.  
+- **Quantization** (KIVI, etc.): complementary; we use fake-int8 only for logical byte accounting.  
 
-## 3. Hypothesis H1 / H1′
+**Positioning.** Mechanism + workstation \(L_\varepsilon\), not a leaderboard chase. Novelty is a **query-unknown discovery** layer on top of H1′ retention, not a new attention kernel.
 
-**Necessity:** Dropping tokens that encode the fact → retrieval fails (ε=0).  
-**Sufficiency (H1′):** sinks ∪ critical±\(R^*\) ∪ recent/question window restores full-KV success; bare critical tokens without radius often corrupt the fact (e.g. trailing digit).
+---
 
-**Kill protocol:** full / oracle_r1 / anti_oracle / recent.
+## 3. Methods (short)
 
-| Result (5×3 multi-seed @4k) | Rate |
-|-----------------------------|------|
-| full | **15/15 (100%)** |
-| oracle_r1 | **15/15 (100%)** |
-| anti_oracle | **0/15 (0%)** |
+**Task.** Needle-in-haystack style secrets in seeded filler; depths \(\{0,0.5,1\}\); success = exact key recall (greedy decode).
 
-\(R^*=1\); mean |oracle| ≈ 149 tokens (~155 start/mid, ~136 end) vs full ~4k.
+**H1′ keep set.** sinks ∪ critical±\(R\) ∪ recent/question window. Kill arms: full, oracle_r1, anti_oracle.
 
-## 4. Scorer tax
+**Posthoc scorer.** `seed_valley`: shared obs-window attention → seeds → contiguous valley + ±R.
 
-Without oracle labels, `seed_valley` (shared attention scores → seeds → contiguous valley + ±R) targets the oracle set.
+**Streaming.** Chunked prefill; compress when cache > budget; peak ≈ budget + chunk.
 
-| Method | \(B_{\min}\) all cells | Mean per-cell \(B_{\min}\) | Tax vs mean \|oracle\| |
-|--------|------------------------|----------------------------|-------------------------|
-| oracle_r1 | ~149 (exact set) | — | **1.0×** |
-| seed_valley | **192** | **172** | **~1.24×** global / **~1.16×** mean |
-| @176 Jaccard vs oracle | — | 0.83 | ~29 extra non-oracle tokens |
+**Oracle-online upper bound.** Force-keep critical±R whenever still in cache (perfect discovery).
 
-Depth 0 hardest (often 192); end-depth often 155.
+**Surface novelty (query-unknown).** Per-token score from within-prefix rarity, first occurrence, and surface cues (digits, ID-like pieces). Expand peaks ±R into pin sets. **Sticky** registry: once discovered, pins stay until evicted; packing ranks pins by score under budget (sinks + recent reserved).
 
-## 5. Systems: streaming \(L_\varepsilon\)
+**Default API.** `prefill_auto(..., mode="stream", discovery="novelty")`.
 
-Posthoc compress still peaks at full prefill KV. **Online** compress after chunks caps peak cache ≈ stream_budget + chunk.
+---
 
-**Multi-seed @4k:** scored stream@512 is **not** robust (33%); stream@1536 ~93%.
+## 4. Results
 
-**Critical upper bound:** with *perfect discovery* (oracle pin of critical±R online), stream@**512** is **15/15** multi-seed — same peak budget where scored attention methods fail. So the systems limit is **not** peak cache; it is **query-unknown discovery**.
+### Figure 1 — Story in four panels
 
-**Partial close of the gap:** a **surface novelty detector** (rarity + digit/ID-like tokens, no question) reaches **14/15 (93%)** at stream@512 multi-seed — matching the quality of valley@1536 at ~⅓ the stream budget on this suite.
+![Figure 1: H1 kill, discovery gap, long-L success, peak cache](figures/fig1_story.png)
 
-| Setting | Multi-seed @4k (5×3) |
-|---------|----------------------|
-| stream_valley@512 | 33% |
-| stream_oracle_pin@512 | **100%** |
-| stream_novelty@512 | **93%** |
-| stream_valley@1536 | ~93% |
+**A. H1′ kill (4k, 5×3 multi-seed).** Full and oracle crit±1 both **15/15**; anti-oracle **0/15**. Bare critical tokens without radius often corrupt trailing digits (H1 needs local context); \(R^*=1\) restores ε≈0. Mean |oracle| ≈ **149** tokens vs full ~4k.
 
-**Long \(L\) multi-seed (3×3 cells):** sticky novelty@512 holds where valley@512 stays end-only:
+**B. Discovery gap (stream@512, same multi-seed protocol).** Attention valley **33%**; surface novelty **93%** (14/15); oracle pin **100%**. Peak budget is in the same class (~1k with chunk). Failures of valley at 512 are **detector** failures, not “stream cannot work.”
 
-| \(L\) | valley@512 | novelty@512 (sticky) | Notes |
-|-------|------------|----------------------|-------|
-| 8k | 33% | **100%** | v0 |
-| 16k | 33% | **100%** | sticky confirm |
-| 24k | (end-only class) | **100%** (was **67%** non-sticky) | sticky fix |
-| 32k | — | **100%** | sticky; peak~1k |
-| 40k | — | **100%** | sticky multi-seed 9/9 @512 |
+**C. Long \(L\) multi-seed (3×3).** Sticky novelty@512 is **9/9** at 16k, 24k, 32k, and **40k**. Non-sticky novelty degraded at 24k (~6/9) via re-rank thrash; sticky packing fixed it. Valley@512 remains end-depth-only (~33%) under multi-seed hay as \(L\) grows.
 
-Peak cache **~1k** (stream@512) vs **~2k** (stream@1536) or full \(L\). Stress suite (NL / ID-flood / multi-needle) also favors novelty over valley at fixed@512.
+**D. Peak cache.** Full KV scales with \(L\); sticky novelty stream@512 stays **~1k** tokens. Prior valley operating points often used **~1.5–2k** peak for long \(L\).
 
-## 6. Transfer
+### Scorer tax (posthoc, question known)
 
-| Model | H1 | Stream (4k mid) | Posthoc min |
-|-------|----|-----------------|-------------|
-| Qwen3-4B | holds | 512 | ~176 |
-| Qwen2.5-3B | holds | 512 (768@8k) | ~320 |
-| Llama-3.2-3B | holds | 512 | ~256 |
-| Gemma-4 E4B hybrid | holds (full layers) | novelty@512 **9/9** multi-seed; valley@1024 | ~176 |
+| Method | All-cell \(B_{\min}\) | Tax vs mean \|oracle\| |
+|--------|----------------------|-------------------------|
+| oracle_r1 | ~149 | 1.0× |
+| seed_valley | **192** | ~**1.24×** global / ~**1.16×** mean |
 
-Hybrid lesson: compress full layers only; score-pass must keep sliding `cumulative_length` as absolute prefix (HF `q_offset` from layer 0). Novelty discovery transfers to hybrid at primary-class stream budgets.
+Posthoc is near-oracle-tight; **stream is not**, until discovery improves.
 
-## 7. Adaptive policy
+### Stress and transfer (summary)
 
-`prefill_auto`: L-based schedule + optional entity estimate + **per-model floors** (Gemma stream≥1024 R≥2, etc.).
+| Check | Result |
+|-------|--------|
+| NL facts (names/places) sticky novelty@512 | **15/15** multi-seed |
+| Code needles sticky | **15/15** |
+| Adversarial ID-like filler (pre-sticky) | novelty **100%** vs valley **33%** |
+| Multi-needle recall_all @512 | novelty **~80%** (open packing edge) |
+| Gemma-4 E4B hybrid novelty@512 | multi-seed **9/9** @4k (valley needs ~1024) |
+| Qwen2.5 / Llama-3.2 | H1 holds; family-specific posthoc floors |
 
-## 8. Limitations
+---
 
-1. Needle / multi-needle suite — not general long-context benchmarks (RULER, LongBench, …).  
-2. Residual scorer tax; stream ≠ oracle-tight.  
-3. Fake int8 logical bytes, not production kernels.  
-4. Multi-seed N still modest for formal claims.  
-5. Generation uses greedy decode; template sensitivity possible.
+## 5. Adaptive policy (systems)
 
-## 9. Conclusion
+`prefill_auto` applies L-based budgets + per-model floors. With default `discovery="novelty"`, single-needle stream@**512** is the measured multi-seed operating point through **40k**. Attn-only discovery still needs larger floors (~1536 multi-seed @4k). Hybrid Gemma: compress **full** layers only; sliding layers keep absolute prefix bookkeeping for score-pass.
 
-Critical-span retention with small local radius is a **necessary structure** for near-lossless training-free KV compression on retrieval tasks; non-oracle scorers approximate it with small tax; streaming raises practical \(L_\varepsilon\) under 24 GB; the mechanism transfers across families including hybrid models.
+---
+
+## 6. Limitations and what we do **not** claim
+
+### 6.1 What we claim
+
+- On this **controlled multi-seed retrieval suite**, critical±\(R^*\) is necessary/sufficient for ε≈0 single-fact recall.  
+- Stream failures at moderate budget are primarily a **query-unknown discovery** problem (oracle-online upper bound).  
+- Sticky surface novelty **closes most of that gap** through **40k** multi-seed at peak cache ~1k on the primary model, with transfer smoke to other small instruct models including hybrid Gemma-4.  
+
+### 6.2 What we do **not** claim
+
+| Not claimed | Why |
+|-------------|-----|
+| **General long-context SOTA** | No full RULER / LongBench / InfiniteBench leaderboard evaluation. |
+| **All task types** | Suite is retrieval / needle-class (plus limited multi-needle and NL fact variants). Reasoning chains, code repos, and multi-doc QA are largely untested. |
+| **Oracle-tight online budgets for free** | Sticky novelty ≈ oracle quality on this suite at@512, but multi-secret packing (~80% multi3) and residual suite-alignment remain. |
+| **Production memory stack** | Fake-int8 is logical accounting only; no fused CUDA kernels, paged attention productization, or serving integration. |
+| **Novelty as universal “importance”** | Detector exploits **surface distinctness** vs repetitive filler. Secrets that look like filler, or filler that looks like IDs, can still confuse discovery (adv suite is only a partial stress). |
+| **Large models / long training-free SOTA** | Primary evidence is **~3–4B** instruct models on one GPU class. |
+| **Statistical finality** | Multi-seed \(N\) is modest (5×3 @4k; 3×3 long-\(L\)). Results are **lab-grade**, not a large multi-run meta-analysis. |
+| **ε=0 beyond measured envelope** | Sticky multi-seed is measured through **40k**; longer \(L\) is extrapolation until re-run. |
+| **Peak VRAM = final decode KV** | Streaming caps **peak cache tokens**; activation/workspace memory and model weights still dominate total VRAM. |
+
+### 6.3 Threats to validity
+
+- **Greedy decode** and chat templates may interact with exact-match scoring.  
+- **Filler distribution** is synthetic; natural corpora may change novelty baselines.  
+- **Hybrid models:** only full layers are compressed; sliding-window behavior is infrastructure-sensitive.  
+- **Selection bias toward positive arms:** we iterated methods until discovery worked; negative results (scored capsules alone, non-sticky long-\(L\)) are reported but the path is research-in-the-loop.
+
+---
+
+## 7. Conclusion
+
+Near-lossless training-free KV compression on retrieval tasks is structured by **critical local neighborhoods**. When the question is known, a simple attention valley scorer approximates the oracle keep set with small tax. When the question is **not** known—as in online streaming—the binding constraint is **discovery**. Sticky surface novelty is a lightweight query-unknown detector that, on our multi-seed suite, restores high success through **40k** context at a **flat ~1k-token peak cache**, transferring to hybrid Gemma-4 at primary-class budgets. The honest next steps are broader tasks and multi-entity packing—not larger single-needle grids alone.
 
 ---
 
 ## Reproducibility
 
 ```text
+# Multi-seed H1 + scorer tax
 python experiments/bench_paper_rigor.py --seeds 0,1,2,3,4 --ctx 4096
-python experiments/bench_transfer.py --model <id>
-python experiments/bench_adaptive_e2e.py
+
+# Discovery gap / novelty
+python experiments/bench_capsules.py --novelty --oracle-online --skip-capsules --budgets 512
+python experiments/bench_novelty_stress.py
+python experiments/bench_novelty_longL.py --ctx 16384,24576,32768,40960 --arms novelty --budgets 512
+
+# Figure
+python experiments/plot_paper_figures.py
+
+# Transfer
+python experiments/bench_transfer.py --model google/gemma-4-E4B-it
 ```
 
-Primary: `Qwen/Qwen3-4B-Instruct-2507`, transformers + CUDA bf16, RTX 3090.
+**Primary model:** `Qwen/Qwen3-4B-Instruct-2507`, transformers, CUDA bf16, RTX 3090.  
+**Artifact index:** `results/FINDINGS.md`.
