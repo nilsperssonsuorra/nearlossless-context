@@ -103,6 +103,7 @@ Posthoc is near-oracle-tight; **stream is not**, until discovery improves.
 | Prose soft fact (no digits) @512 | novelty **15/15**; valley **53%** |
 | Multidoc (6 titled docs) @512 | novelty **15/15**; valley/oracle_pin **5/15** |
 | External-style mixed QA (10 items, ~4k padded) | novelty **10/10** hits (= full); valley **0/10** |
+| **Public LongBench** (60: multifieldqa_en+qasper+hotpotqa @4k) | full F1 **0.28** / hit 23%; novelty **0.19** / 10%; valley **0.18** / 8%; hybrid **0.19** / **12%** |
 | Gemma-4 E4B hybrid novelty@512 | multi-seed **9/9** @4k (valley needs ~1024) |
 | Qwen2.5 / Llama-3.2 | H1 holds; family-specific posthoc floors |
 
@@ -138,7 +139,7 @@ Peak cache tokens stay **~1024** under novelty stream@512 at all three lengths. 
 
 | Not claimed | Why |
 |-------------|-----|
-| **General long-context SOTA** | No full RULER / LongBench / InfiniteBench leaderboard. A small mixed-domain external-style slice (10 items) matches full under novelty; not a public leaderboard. |
+| **General long-context SOTA** | Public LongBench slice (60 items) shows novelty only slightly above valley and **well below full** (mean F1 0.19 vs 0.28). Strong on needle/retrieval suites; not a free lunch on open long-doc QA. |
 | **All task types** | Suite is retrieval / needle-class (plus limited multi-needle and NL fact variants). Reasoning chains, code repos, and multi-doc QA are largely untested. |
 | **Oracle-tight online budgets for free** | Sticky novelty matches multi3/hop quality at@512 on this suite when decode budget is adequate; multi-secret packing still stresses oracle_pin@512 (2/5). Suite-alignment of surface novelty remains. |
 | **Production memory stack** | Fake-int8 is logical accounting only; no fused CUDA kernels, paged attention productization, or serving integration. |

@@ -14,6 +14,8 @@ past, logits, info = prefill_auto(
     model, input_ids, mode="stream", tokenizer=tokenizer
 )
 # discovery="novelty" (default) — query-unknown surface detector, stream@512-class
+# discovery="hybrid" — novelty ∪ attn peaks + final query-aware re-rank (slight LB gain)
+# discovery="query_hold" — hold ~2048 then query-aware tighten (best LB so far; higher peak)
 # discovery="attn" — legacy mid-stream attention (needs larger budgets)
 # info["policy"] has R, stream_budget, family; info["path"] shows novelty vs attn
 

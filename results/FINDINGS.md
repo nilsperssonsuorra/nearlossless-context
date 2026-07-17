@@ -137,7 +137,7 @@ Docs: `papers/CAPSULES.md` · `experiments/novelty_detect.py` · `bench_novelty_
 
 ### External-style slice (`external_slice_20260717T210638Z`)
 
-Not a full LongBench/RULER leaderboard (HF LongBench dataset scripts no longer load on current `datasets`). Instead: **10 diverse offline QA items** (wiki-ish, ops, multi-doc, science, legal, …) **padded to ~4k** so stream@512 actually compresses.
+**10 offline mixed-domain QA items** padded to ~4k (not public leaderboard):
 
 | Arm | Mean token-F1 | Substring hit rate |
 |-----|---------------|--------------------|
@@ -145,11 +145,73 @@ Not a full LongBench/RULER leaderboard (HF LongBench dataset scripts no longer l
 | stream_valley@512 | 0.01 | **0/10** |
 | **stream_novelty@512** | **0.37** | **10/10** |
 
-Peak cache under stream arms: **~1024**. Novelty **matches full** on hit rate; valley loses the facts under compression.
+**VERDICT: `EXTERNAL_STYLE_SLICE_OK`** on controlled mixed short-answer items.
 
-**VERDICT: `EXTERNAL_STYLE_SLICE_OK`** — sticky novelty transfers beyond pure needle templates to mixed-domain short answers under forced long context. Public LongBench load remains future work (parquet data files / pinned datasets version).
+### Public LongBench slice (`external_slice_20260717T212729Z`)
 
-Bench: `experiments/bench_external_slice.py` · portfolio: `PORTFOLIO.md`.
+**Real public data:** THUDM/LongBench `data.zip` → 20× each of `multifieldqa_en`, `qasper`, `hotpotqa` (**60 items**). Contexts truncated to **max_ctx=4096** tokens. Arms: full / stream_valley@512 / stream_novelty@512. Metrics: token F1 vs gold answers + substring hit.
+
+| Arm | Mean F1 | Substr hit |
+|-----|---------|------------|
+| full | **0.283** | **14/60 (23%)** |
+| stream_valley@512 | 0.178 | 5/60 (8%) |
+| stream_novelty@512 | 0.188 | 6/60 (10%) |
+
+Per-task mean F1 (n=20 each):
+
+| Task | full | valley@512 | novelty@512 |
+|------|------|------------|-------------|
+| multifieldqa_en | 0.41 | 0.26 | **0.32** |
+| qasper | 0.29 | **0.17** | 0.13 |
+| hotpotqa | 0.15 | 0.10 | **0.11** |
+
+On the **14 items where full had a substring hit**: novelty hit rate **36%** vs valley **29%** (still far from 100%). Full absolute quality is modest (4B + greedy + 4k truncate + short max_new) — expected.
+
+**On the 14 items where full had a substring hit:** novelty and valley still only recover a small fraction (compression + truncate hurt when the answer is not surface-novel).
+
+**VERDICT: `LONGBENCH_SLICE_HONEST`**
+
+- Public LongBench **does not** show the same near-full recovery as needles/prose/multidoc.  
+- Novelty is **not worse** than valley and is slightly better on mean F1/hit, but **far from full**.  
+- Supports the paper limitation: surface novelty is **suite-sensitive**; general long-doc QA needs better discovery (or question-aware / hybrid methods).  
+- Still a real public-data measurement, not only synthetic needles.
+
+### Hybrid query-aware stream (`external_slice_20260717T214742Z`)
+
+Same 60 LongBench items + arm **`hybrid`**: sticky novelty ∪ mid-stream attn peaks, final query-aware re-rank (question in obs window); hold_factor=1.5 → peak cache **~1280**.
+
+| Arm | Mean F1 | Substr hit | Peak cache |
+|-----|---------|------------|------------|
+| full | **0.283** | **14/60 (23%)** | =L |
+| valley@512 | 0.178 | 5/60 (8%) | ~1024 |
+| novelty@512 | 0.188 | 6/60 (10%) | ~1024 |
+| **hybrid@512** | 0.186 | **7/60 (12%)** | ~1280 |
+
+**VERDICT: `HYBRID_SMALL_GAIN`**
+
+- Hybrid slightly improves hit rate vs pure novelty/valley but **does not approach full**.  
+- Query-aware re-ranking of survivors cannot recover spans already dropped mid-stream when answers are not surface-novel.
+
+### Query-hold stream (`external_slice_20260717T220102Z`)
+
+Same 60 LongBench items. **query_hold**: hybrid pins with **hold_budget=2048** (peak ~2560) then query-aware tighten to final **512**.
+
+| Arm | Mean F1 | Substr hit | Peak cache | F1 / full |
+|-----|---------|------------|------------|-----------|
+| full | **0.283** | **23%** | =L | 1.00× |
+| novelty@512 | 0.188 | 10% | ~1024 | 0.66× |
+| hybrid@512 | 0.186 | 12% | ~1280 | 0.66× |
+| **query_hold@512** | **0.215** | **17% (10/60)** | **~2560** | **0.76×** |
+
+**VERDICT: `QUERY_HOLD_HELPS`**
+
+- Holding more tokens until the question is present **clearly helps** LongBench (hit 10%→17%, F1 0.19→0.22).  
+- Tradeoff: peak cache ~**2.5×** novelty@512. Systems story becomes a **Pareto** (quality vs peak), not free lunch at peak~1k.  
+- Still not full (0.76× F1); remaining gap = discovery of non-novel answer spans + 4B/truncate/greedy ceilings.  
+- Next: hold 4096 / final 1024, embedding pins, or posthoc query-aware after full prefill (upper bound on discovery given peak=L).
+
+API: `discovery="query_hold"` · `prefill_streaming_query_hold(hold_budget=2048)`.  
+Loader: `data/longbench/` via `data.zip` (gitignored).
 
 ### Long-L multi-seed novelty (`novelty_longL_20260716T180614Z` + sticky `…T210746Z`)
 

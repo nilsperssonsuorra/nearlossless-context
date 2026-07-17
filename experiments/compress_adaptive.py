@@ -182,6 +182,8 @@ def prefill_stream_adaptive(
 
     discovery:
       "novelty" — surface novelty pin (query-unknown; recommended default)
+      "hybrid"  — novelty ∪ mid-stream attn peaks + final query-aware re-rank
+      "query_hold" — hybrid with large hold_budget (default 2048) then tighten
       "attn"    — seed_valley mid-stream attention (legacy; needs higher budget)
     """
     mid = _resolve_model_id(model, model_id)
@@ -207,8 +209,12 @@ def prefill_stream_adaptive(
     if auto_raise_budget is None:
         auto_raise_budget = n_entities is None and discovery == "attn"
 
-    if discovery == "novelty":
-        from novelty_detect import prefill_streaming_novelty_pin
+    if discovery in ("novelty", "hybrid", "query_hold"):
+        from novelty_detect import (
+            prefill_streaming_hybrid_pin,
+            prefill_streaming_novelty_pin,
+            prefill_streaming_query_hold,
+        )
         from transformers import AutoTokenizer
 
         tok = tokenizer
@@ -216,23 +222,52 @@ def prefill_stream_adaptive(
             name = mid or getattr(getattr(model, "config", None), "_name_or_path", None)
             if not name:
                 raise ValueError(
-                    "discovery='novelty' requires tokenizer= or model_id resolvable"
+                    f"discovery='{discovery}' requires tokenizer= or model_id resolvable"
                 )
             tok = AutoTokenizer.from_pretrained(name, trust_remote_code=True)
             if tok.pad_token is None:
                 tok.pad_token = tok.eos_token
-        past, logits, stats = prefill_streaming_novelty_pin(
-            model,
-            tok,
-            input_ids,
-            stream_budget=pol.stream_budget,
-            final_budget=pol.stream_budget,
-            chunk_size=chunk_size,
-            window_size=window_size,
-            sinks=sinks,
-            expand_radius=pol.R,
-        )
-        path = "stream_novelty"
+        if discovery == "query_hold":
+            past, logits, stats = prefill_streaming_query_hold(
+                model,
+                tok,
+                input_ids,
+                final_budget=pol.stream_budget,
+                hold_budget=max(2048, pol.stream_budget * 4),
+                chunk_size=chunk_size,
+                window_size=window_size,
+                sinks=sinks,
+                expand_radius=pol.R,
+                score_layers=score_layers,
+            )
+            path = "stream_query_hold"
+        elif discovery == "hybrid":
+            past, logits, stats = prefill_streaming_hybrid_pin(
+                model,
+                tok,
+                input_ids,
+                stream_budget=pol.stream_budget,
+                final_budget=pol.stream_budget,
+                chunk_size=chunk_size,
+                window_size=window_size,
+                sinks=sinks,
+                expand_radius=pol.R,
+                score_layers=score_layers,
+            )
+            path = "stream_hybrid"
+        else:
+            past, logits, stats = prefill_streaming_novelty_pin(
+                model,
+                tok,
+                input_ids,
+                stream_budget=pol.stream_budget,
+                final_budget=pol.stream_budget,
+                chunk_size=chunk_size,
+                window_size=window_size,
+                sinks=sinks,
+                expand_radius=pol.R,
+            )
+            path = "stream_novelty"
     else:
         past, logits, stats = prefill_streaming_valley(
             model,

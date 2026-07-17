@@ -81,6 +81,7 @@ See `USAGE.md` and `results/FINDINGS.md`.
 | stream novelty@512 @4k | **93% (14/15)**; stress NL/prose/multidoc/multi3/hop **strong** |
 | multidoc (6 docs) | novelty **15/15** @512; valley/oracle_pin **5/15** |
 | External-style mixed QA | novelty **10/10** = full hits; valley **0/10** @512 (~4k padded) |
+| Public LongBench 60 | full F1 **0.28**/hit 23%; novelty **0.19**/10%; hybrid 12%; **query_hold 0.22/17%** (0.76× full F1, peak~2.5k) |
 | sticky novelty@512 long-L 3×3 | **9/9 @16k, 24k, 32k, 40k** (v0 non-sticky 24k was 6/9) |
 
 Draft: `papers/PAPER_DRAFT.md` · **PDF:** `papers/main.pdf` (`build_pdf.ps1` / `main.tex`) · fig: `papers/figures/fig1_story.png`

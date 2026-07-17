@@ -31,7 +31,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import PRIMARY_MODEL_ID, RESULTS_DIR, SNAPKV_WINDOW  # noqa: E402
 from decode_utils import greedy_generate  # noqa: E402
-from novelty_detect import prefill_streaming_novelty_pin  # noqa: E402
+from novelty_detect import (  # noqa: E402
+    prefill_streaming_hybrid_pin,
+    prefill_streaming_novelty_pin,
+    prefill_streaming_query_hold,
+)
 from scorer_valley import prefill_streaming_valley  # noqa: E402
 from snapkv import cache_seq_len, prefill_chunked  # noqa: E402
 from utils import write_csv  # noqa: E402
@@ -196,7 +200,12 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Small external eval slice")
     p.add_argument("--model", default=PRIMARY_MODEL_ID)
     p.add_argument("--source", default="auto", choices=["auto", "longbench", "offline"])
-    p.add_argument("--n", type=int, default=12, help="Max items")
+    p.add_argument("--n", type=int, default=60, help="Max items total")
+    p.add_argument(
+        "--tasks",
+        default="multifieldqa_en,qasper,hotpotqa",
+        help="LongBench jsonl stems (comma list)",
+    )
     p.add_argument("--budget", type=int, default=512)
     p.add_argument("--max-ctx", type=int, default=4096)
     p.add_argument("--max-new", type=int, default=64)
@@ -204,8 +213,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dtype", default="bfloat16")
     p.add_argument(
         "--arms",
-        default="full,valley,novelty",
-        help="Comma list: full,valley,novelty",
+        default="full,valley,novelty,hybrid,query_hold",
+        help="Comma list: full,valley,novelty,hybrid,query_hold",
+    )
+    p.add_argument(
+        "--hold-budget",
+        type=int,
+        default=2048,
+        help="Mid-stream hold cache for query_hold arm",
     )
     return p.parse_args()
 
@@ -293,98 +308,104 @@ def pad_context(tokenizer, context: str, target_tokens: int, seed: int) -> str:
     return "".join(chunks)
 
 
-def load_longbench_items(n: int, max_ctx_chars: int = 20000) -> list[dict] | None:
-    try:
-        from datasets import load_dataset
-        from huggingface_hub import hf_hub_download, list_repo_files
-    except Exception as e:
-        print(f"datasets/hub import failed: {e}", flush=True)
-        return None
+ROOT = Path(__file__).resolve().parents[1]
+LONGBENCH_DIR = ROOT / "data" / "longbench" / "data"
 
-    # Prefer parquet/json data files (dataset scripts disabled in modern datasets)
-    for repo in ("THUDM/LongBench", "zai-org/LongBench"):
-        try:
-            print(f"Listing files in {repo} ...", flush=True)
-            files = list_repo_files(repo, repo_type="dataset")
-            # common patterns: data/multifieldqa_en.jsonl etc.
-            candidates = [
-                f
-                for f in files
-                if any(
-                    k in f.lower()
-                    for k in (
-                        "multifieldqa_en",
-                        "qasper",
-                        "hotpotqa",
-                        "narrativeqa",
-                    )
-                )
-                and f.endswith((".json", ".jsonl", ".parquet"))
-            ]
-            if not candidates:
-                # any english-looking json
-                candidates = [
-                    f
-                    for f in files
-                    if f.endswith((".jsonl", ".json")) and "zh" not in f.lower()
-                ][:8]
-            for path in candidates[:6]:
-                try:
-                    print(f"  downloading {path} ...", flush=True)
-                    local = hf_hub_download(
-                        repo_id=repo, filename=path, repo_type="dataset"
-                    )
-                    if local.endswith(".parquet"):
-                        ds = load_dataset("parquet", data_files=local, split="train")
-                    else:
-                        ds = load_dataset("json", data_files=local, split="train")
-                    items = []
-                    for i, row in enumerate(ds):
-                        if len(items) >= n:
-                            break
-                        ctx = row.get("context")
-                        if ctx is None:
-                            continue
-                        ctx = str(ctx)
-                        q = str(row.get("input") or row.get("question") or "")
-                        ans = row.get("answers") or row.get("answer") or []
-                        if isinstance(ans, str):
-                            ans = [ans]
-                        ans = [str(a) for a in ans if str(a).strip()]
-                        if not ans:
-                            continue
-                        if len(ctx) > max_ctx_chars:
-                            half = max_ctx_chars // 2
-                            ctx = ctx[:half] + "\n...\n" + ctx[-half:]
-                        items.append(
-                            {
-                                "id": f"{Path(path).stem}_{i}",
-                                "context": ctx,
-                                "question": q or "Answer based on the context.",
-                                "answers": ans,
-                                "source": f"{repo}:{path}",
-                            }
-                        )
-                    if items:
-                        print(
-                            f"Loaded {len(items)} items from {repo}/{path}",
-                            flush=True,
-                        )
-                        return items
-                except Exception as e:
-                    print(f"  file failed: {type(e).__name__}: {e}", flush=True)
-        except Exception as e:
-            print(f"repo failed: {type(e).__name__}: {e}", flush=True)
+
+def ensure_longbench_data() -> Path | None:
+    """Download THUDM/LongBench data.zip if missing; return data/ dir with jsonl files."""
+    if LONGBENCH_DIR.is_dir() and any(LONGBENCH_DIR.glob("*.jsonl")):
+        return LONGBENCH_DIR
+    try:
+        from huggingface_hub import hf_hub_download
+        import zipfile
+    except Exception as e:
+        print(f"hub import failed: {e}", flush=True)
+        return None
+    try:
+        print("Downloading THUDM/LongBench data.zip ...", flush=True)
+        zpath = hf_hub_download(
+            repo_id="THUDM/LongBench", filename="data.zip", repo_type="dataset"
+        )
+        out = ROOT / "data" / "longbench"
+        out.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(zpath, "r") as zf:
+            zf.extractall(out)
+        if LONGBENCH_DIR.is_dir() and any(LONGBENCH_DIR.glob("*.jsonl")):
+            print(f"Extracted LongBench to {LONGBENCH_DIR}", flush=True)
+            return LONGBENCH_DIR
+    except Exception as e:
+        print(f"LongBench download failed: {type(e).__name__}: {e}", flush=True)
     return None
 
 
-def load_items(source: str, n: int, tokenizer=None, pad_to: int = 0) -> tuple[list[dict], str]:
+def load_longbench_jsonl(
+    tasks: list[str],
+    n_per_task: int,
+    max_ctx_chars: int = 50000,
+) -> list[dict]:
+    data_dir = ensure_longbench_data()
+    if data_dir is None:
+        return []
+    items: list[dict] = []
+    for task in tasks:
+        path = data_dir / f"{task}.jsonl"
+        if not path.is_file():
+            print(f"  missing {path.name}", flush=True)
+            continue
+        n_task = 0
+        with path.open(encoding="utf-8") as f:
+            for i, line in enumerate(f):
+                if n_task >= n_per_task:
+                    break
+                row = json.loads(line)
+                ctx = row.get("context")
+                if not ctx:
+                    continue
+                ctx = str(ctx)
+                q = str(row.get("input") or row.get("question") or "")
+                ans = row.get("answers") or row.get("answer") or []
+                if isinstance(ans, str):
+                    ans = [ans]
+                ans = [str(a) for a in ans if str(a).strip()]
+                if not ans:
+                    continue
+                if len(ctx) > max_ctx_chars:
+                    half = max_ctx_chars // 2
+                    ctx = ctx[:half] + "\n...\n" + ctx[-half:]
+                items.append(
+                    {
+                        "id": f"{task}_{row.get('_id', i)}",
+                        "task": task,
+                        "context": ctx,
+                        "question": q or "Answer based on the context.",
+                        "answers": ans,
+                        "source": f"THUDM/LongBench:{task}",
+                        "orig_length": row.get("length"),
+                    }
+                )
+                n_task += 1
+        print(f"  loaded {n_task} from {task}", flush=True)
+    return items
+
+
+def load_items(
+    source: str,
+    n: int,
+    tokenizer=None,
+    pad_to: int = 0,
+    tasks: str = "multifieldqa_en,qasper,hotpotqa",
+) -> tuple[list[dict], str]:
     items: list[dict] = []
     src = "offline"
     if source in ("auto", "longbench"):
-        lb = load_longbench_items(n)
+        task_list = [t.strip() for t in tasks.split(",") if t.strip()]
+        # split n across tasks
+        n_per = max(1, (n + len(task_list) - 1) // len(task_list))
+        print(f"Loading LongBench local jsonl tasks={task_list} n_per={n_per}", flush=True)
+        lb = load_longbench_jsonl(task_list, n_per_task=n_per)
         if lb:
-            items, src = lb, "longbench"
+            items, src = lb[:n], "longbench"
         elif source == "longbench":
             print("LongBench unavailable", flush=True)
             return [], "longbench"
@@ -394,12 +415,10 @@ def load_items(source: str, n: int, tokenizer=None, pad_to: int = 0) -> tuple[li
         items = [dict(x) for x in OFFLINE_ITEMS[:n]]
         src = "offline"
 
-    # Pad short offline contexts so stream@512 actually compresses
-    if tokenizer is not None and pad_to > 0:
+    # Pad only short offline contexts so stream@512 compresses
+    if tokenizer is not None and pad_to > 0 and src == "offline":
         for i, it in enumerate(items):
-            seq0 = len(
-                tokenizer.encode(it["context"], add_special_tokens=False)
-            )
+            seq0 = len(tokenizer.encode(it["context"], add_special_tokens=False))
             if seq0 < pad_to - 200:
                 it["context"] = pad_context(
                     tokenizer, it["context"], pad_to, seed=i + 7
@@ -423,14 +442,19 @@ def main() -> None:
 
     # Pad offline items to max_ctx so stream budgets matter
     items, src = load_items(
-        args.source, args.n, tokenizer=tokenizer, pad_to=args.max_ctx
+        args.source,
+        args.n,
+        tokenizer=tokenizer,
+        pad_to=args.max_ctx,
+        tasks=args.tasks,
     )
     if not items:
         print("No items to evaluate.", flush=True)
         return
 
     print(
-        f"source={src} n={len(items)} budget={args.budget} arms={arms} max_ctx={args.max_ctx}",
+        f"source={src} n={len(items)} budget={args.budget} arms={arms} "
+        f"max_ctx={args.max_ctx} tasks={args.tasks}",
         flush=True,
     )
 
@@ -479,6 +503,28 @@ def main() -> None:
                         input_ids,
                         stream_budget=args.budget,
                         final_budget=args.budget,
+                        chunk_size=512,
+                        window_size=args.window,
+                    )
+                    peak = st.get("peak_cache")
+                elif arm == "hybrid":
+                    past, logits, st = prefill_streaming_hybrid_pin(
+                        model,
+                        tokenizer,
+                        input_ids,
+                        stream_budget=args.budget,
+                        final_budget=args.budget,
+                        chunk_size=512,
+                        window_size=args.window,
+                    )
+                    peak = st.get("peak_cache")
+                elif arm == "query_hold":
+                    past, logits, st = prefill_streaming_query_hold(
+                        model,
+                        tokenizer,
+                        input_ids,
+                        final_budget=args.budget,
+                        hold_budget=args.hold_budget,
                         chunk_size=512,
                         window_size=args.window,
                     )

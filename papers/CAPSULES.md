@@ -75,7 +75,8 @@ Bench: `experiments/bench_capsules.py`
 | 4 | ~~Prose soft-fact stress~~ **done** — 15/15 novelty vs valley 53% |
 | 5 | ~~Multidoc (6 docs)~~ **done** — novelty 15/15; valley/oracle 5/15 |
 | 6 | ~~External-style mixed QA slice~~ **done** — novelty 10/10 = full; valley 0/10 @512 |
-| 7 | Optional public LongBench parquet load when hub data files available |
+| 7 | ~~Public LongBench slice (60 items)~~ **done** — novelty ≳ valley but ≪ full (honest) |
+| 8 | ~~Hybrid query-aware stream~~ **done** — hit 12% vs novelty 10% on LB; still ≪ full |
 ## What would count as a win
 
 - Higher multi-seed success than `seed_valley` at the **same** stream budget, or  

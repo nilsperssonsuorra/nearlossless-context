@@ -20,3 +20,6 @@ papers/*.toc
 papers/*.synctex.gz
 papers/*.fls
 papers/*.fdb_latexmk
+
+# Large downloaded benchmarks
+data/longbench/
