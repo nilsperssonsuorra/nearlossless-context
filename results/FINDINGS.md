@@ -96,7 +96,10 @@ stream@512, 5 seeds (depths {0,0.5,1} except multi3 mid-only):
 | code (control) | 33% | **100%** | 100% | sticky recheck 15/15 |
 | **nl** (Seraphine / Reykjavik) | 40% | **100%** (was 87% pre-sticky) | 100% | sticky recheck 15/15 |
 | **prose** (soft English, no digits/IDs) | 53% | **100% (15/15)** | 100% | `…T203709Z` — rarity still separates fact from prose hay |
+| **multidoc** (6 titled docs; one holds fact) | **33%** | **100% (15/15)** | **33%**† | `…T205257Z` — out-of-suite-ish multi-doc retrieval |
 | **adv** (ID-like filler flood) | 33% | **100%** | 100% | pre-sticky |
+
+† Multidoc oracle_pin@512 only passes **depth=0** (5/15): packing under budget when the relevant doc is mid/end is fragile; **novelty still 15/15**. Valley only end-depth (5/15).
 | **multi3** (3 secrets recall_all) | **0/5** | **5/5 (100%)**‡ | 2/5 @512 / 5/5 @1024 | sticky + `max_new≥96` `…T202222Z` |
 | **hop2** (Alice→id→password) | 1/5 @512 / 5/5 @1024 | **5/5 @512** | — | sticky |
 | **hop3** (3-link + distractors) | **0/5** @512 / 5/5 @1024 | **5/5 @512** | — | sticky `…T202346Z` |

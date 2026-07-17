@@ -78,7 +78,8 @@ See `USAGE.md` and `results/FINDINGS.md`.
 | H1 full / oracle / anti @4k 5×3 | **15/15 / 15/15 / 0/15** |
 | seed_valley all-cell \(B_{\min}\) | **192** (~1.24× oracle) |
 | stream valley@512 / @1536 @4k | **33% / ~93%** |
-| stream novelty@512 @4k | **93% (14/15)**; stress NL/prose/adv/multi3/hop **strong** |
+| stream novelty@512 @4k | **93% (14/15)**; stress NL/prose/multidoc/multi3/hop **strong** |
+| multidoc (6 docs) | novelty **15/15** @512; valley/oracle_pin **5/15** |
 | sticky novelty@512 long-L 3×3 | **9/9 @16k, 24k, 32k, 40k** (v0 non-sticky 24k was 6/9) |
 
 Draft: `papers/PAPER_DRAFT.md` · **PDF:** `papers/main.pdf` (`build_pdf.ps1` / `main.tex`) · fig: `papers/figures/fig1_story.png`

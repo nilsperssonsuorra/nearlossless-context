@@ -19,6 +19,7 @@ On multi-seed retrieval (primary `Qwen3-4B`, RTX 3090):
 | Stream **oracle pin** @512 | **15/15** — failures are **discovery**, not peak budget |
 | Stream **sticky novelty** @512 | **~93–100%** @4k; **9/9 multi-seed through 40k**; peak cache **~1k** |
 | multi3 / hop2 / hop3 | novelty **5/5 @512**; valley multi3 & hop3 **0/5** @512 |
+| multidoc (6 titled docs) | novelty **15/15 @512**; valley/oracle_pin **5/15** |
 | Peak resources (novelty@512) | decode KV **~72 MB**, peak VRAM **~8.3 GB** **flat** 4k→40k |
 | Transfer | H1 holds on Qwen2.5 / Llama-3.2; Gemma-4 hybrid novelty@512 **9/9** |
 

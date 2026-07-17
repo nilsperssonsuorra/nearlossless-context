@@ -100,6 +100,8 @@ Posthoc is near-oracle-tight; **stream is not**, until discovery improves.
 | Multi-needle recall_all @512 | novelty **5/5** (`max_new≥96`); valley **0/5** |
 | 2-hop (Alice→id→password) @512 | novelty **5/5**; valley **1/5** (needs @1024 for 5/5) |
 | 3-hop + distractors @512 | novelty **5/5**; valley **0/5** (needs @1024 for 5/5) |
+| Prose soft fact (no digits) @512 | novelty **15/15**; valley **53%** |
+| Multidoc (6 titled docs) @512 | novelty **15/15**; valley/oracle_pin **5/15** |
 | Gemma-4 E4B hybrid novelty@512 | multi-seed **9/9** @4k (valley needs ~1024) |
 | Qwen2.5 / Llama-3.2 | H1 holds; family-specific posthoc floors |
 

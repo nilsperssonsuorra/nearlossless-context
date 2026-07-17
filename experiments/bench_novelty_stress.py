@@ -94,6 +94,31 @@ ADV_FILLER_UNITS = [
     "Session key KEY-AB12-CD34 rotated; link PROFILE-9-SIGMA stable. ",
 ]
 
+# Multi-doc retrieval: N titled docs; one holds the answer fact
+MULTIDOC_TITLES = [
+    "Harbor Logistics Memo",
+    "Museum Board Minutes",
+    "Clinic Night Shift Log",
+    "Library Acquisition Notes",
+    "Bridge Inspection Brief",
+    "Greenhouse Weekly Report",
+]
+MULTIDOC_DISTRACTORS = [
+    "Routine inventory completed without exception; staff schedules remain unchanged. ",
+    "Visitors reported a calm day; no incidents required follow-up action. ",
+    "Budget line items were reviewed and marked as within expected variance. ",
+    "Maintenance closed two tickets related to lighting and door sensors. ",
+]
+MULTIDOC_FACT = (
+    "Action item: the sealed sample case labeled AMBER-QUILL-55 must be stored "
+    "in cold locker C-7 before midnight."
+)
+MULTIDOC_KEYS = ["AMBER-QUILL-55", "C-7"]
+MULTIDOC_Q_TMPL = (
+    "According to the document titled \"{title}\", what is the sample case label "
+    "and which cold locker should hold it? Answer with the exact label and locker only."
+)
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Novelty detector stress suite")
@@ -104,8 +129,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--budgets", default="512")
     p.add_argument(
         "--scenarios",
-        default="code,nl,adv,multi3,hop2,hop3,prose",
-        help="Comma list: code,nl,adv,prose,multi3,hop2,hop3",
+        default="code,nl,adv,multi3,hop2,hop3,prose,multidoc",
+        help="Comma list: code,nl,adv,prose,multi3,hop2,hop3,multidoc",
+    )
+    p.add_argument(
+        "--n-docs",
+        type=int,
+        default=6,
+        help="Number of titled docs for multidoc scenario",
     )
     p.add_argument("--window", type=int, default=SNAPKV_WINDOW)
     p.add_argument("--R", type=int, default=1)
@@ -149,6 +180,7 @@ def build_scenario_prompt(
     target_tokens: int,
     depth: float,
     seed: int | None = None,
+    n_docs: int = 6,
 ) -> tuple[str, list[str], str]:
     """Return (prompt_text, keys, question)."""
     depth = max(0.0, min(1.0, depth))
@@ -255,6 +287,15 @@ def build_scenario_prompt(
             facts=facts, question=question, target_tokens=target_tokens, keys=keys,
         )
 
+    elif scenario == "multidoc":
+        return _build_multidoc_prompt(
+            tokenizer,
+            target_tokens=target_tokens,
+            depth=depth,
+            seed=seed,
+            n_docs=max(3, int(n_docs)),
+        )
+
     else:
         raise ValueError(scenario)
 
@@ -275,6 +316,52 @@ def _filler_unit(r):
     if r is None:
         return FILLER
     return r.choice(FILLER_VARIANTS)
+
+
+def _build_multidoc_prompt(
+    tokenizer,
+    *,
+    target_tokens: int,
+    depth: float,
+    seed: int | None,
+    n_docs: int = 6,
+) -> tuple[str, list[str], str]:
+    """
+    Out-of-suite-ish stress: several titled documents; one contains the fact.
+    depth maps to which document index holds the answer (0=first, 1=last).
+    """
+    rng = random.Random(seed if seed is not None else 0)
+    n_docs = max(3, min(n_docs, len(MULTIDOC_TITLES)))
+    titles = MULTIDOC_TITLES[:n_docs]
+    # which doc holds the fact
+    idx = int(round(max(0.0, min(1.0, depth)) * (n_docs - 1)))
+    answer_title = titles[idx]
+    keys = list(MULTIDOC_KEYS)
+    question = MULTIDOC_Q_TMPL.format(title=answer_title)
+
+    # token budget per doc body
+    body_budget = max(target_tokens - 220, 256)
+    per_doc = max(body_budget // n_docs, 80)
+    docs: list[str] = []
+    for i, title in enumerate(titles):
+        chunks: list[str] = []
+        while True:
+            text = "".join(chunks)
+            if len(tokenizer.encode(text, add_special_tokens=False)) >= per_doc:
+                break
+            chunks.append(rng.choice(MULTIDOC_DISTRACTORS + PROSE_FILLER_UNITS))
+        body = "".join(chunks)
+        if i == idx:
+            # plant fact mid-document
+            pos = max(0, len(body) // 2)
+            pos = body.rfind(" ", 0, pos + 1)
+            if pos < 0:
+                pos = 0
+            body = body[:pos] + " " + MULTIDOC_FACT + " " + body[pos:]
+        docs.append(f"### Document: {title}\n{body.strip()}\n")
+    context = "\n".join(docs)
+    user = f"Context (multiple documents):\n{context}\n\nQuestion: {question}"
+    return _chat_wrap(tokenizer, user, target_tokens), keys, question
 
 
 def _plant_facts(
@@ -402,6 +489,7 @@ def main() -> None:
                     target_tokens=args.ctx,
                     depth=depth,
                     seed=seed,
+                    n_docs=args.n_docs,
                 )
                 input_ids = tokenizer(prompt, return_tensors="pt")["input_ids"].to(
                     device
