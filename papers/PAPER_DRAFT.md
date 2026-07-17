@@ -97,9 +97,22 @@ Posthoc is near-oracle-tight; **stream is not**, until discovery improves.
 | NL facts (names/places) sticky novelty@512 | **15/15** multi-seed |
 | Code needles sticky | **15/15** |
 | Adversarial ID-like filler (pre-sticky) | novelty **100%** vs valley **33%** |
-| Multi-needle recall_all @512 | novelty **~80%** (open packing edge) |
+| Multi-needle recall_all @512 | novelty **4/5 (80%)**; valley **0/5**; residual 1-seed (5/6 keys) |
+| 2-hop (Alice→id→password) @512 | novelty **5/5**; valley **1/5** (valley needs @1024 for 5/5) |
 | Gemma-4 E4B hybrid novelty@512 | multi-seed **9/9** @4k (valley needs ~1024) |
 | Qwen2.5 / Llama-3.2 | H1 holds; family-specific posthoc floors |
+
+### Systems resources (peak VRAM / latency)
+
+Mid-depth needle, seed 0 (`systems_resources_20260717T130143Z`):
+
+| L | full peak VRAM | novelty@512 peak VRAM | full decode KV | novelty KV | novelty prefill |
+|---|----------------|----------------------|----------------|------------|-----------------|
+| 4k | 8.5 GB | **8.3 GB** | 569 MB | **72 MB** | 1.6 s |
+| 16k | 10.6 GB | **8.3 GB** | 2296 MB | **72 MB** | 5.9 s |
+| 40k | 14.5 GB | **8.3 GB** | 5754 MB | **72 MB** | 17.6 s |
+
+Peak cache tokens stay **~1024** under novelty stream@512 at all three lengths. Full 40k prefill was extremely slow on this workstation session (~20 min; WDDM path); novelty remains interactive.
 
 ---
 

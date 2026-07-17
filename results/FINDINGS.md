@@ -96,11 +96,33 @@ stream@512, 5 seeds (depths {0,0.5,1} except multi3 mid-only):
 | code (control) | 33% | **100%** | 100% | sticky recheck 15/15 |
 | **nl** (Seraphine / Reykjavik) | 40% | **100%** (was 87% pre-sticky) | 100% | sticky recheck 15/15 |
 | **adv** (ID-like filler flood) | 33% | **100%** | 100% | pre-sticky |
-| **multi3** (3 secrets recall_all) | 0% | **80%** | 40%† | pre-sticky |
+| **multi3** (3 secrets recall_all) | 0% | **80%** | 40%† | sticky recheck `…T122642Z` still 4/5 |
+| **hop2** (Alice→E-4412→password) | 20% @512 / 100% @1024 | **100% @512** | — | sticky `…T123059Z` 5/5 |
 
-† Oracle_pin@512 multi3 can drop a span under packing/order edge cases; novelty still often wins.
+† Oracle_pin@512 multi3 can drop a span under packing/order edge cases (2/5); oracle@1024 = 5/5. Novelty@512 often **beats** oracle@512 packing (4/5 vs 2/5). Raising max_capsules 12→24 did not fix the residual multi3 seed.
 
-**VERDICT: `NOVELTY_STRESS_PASS`** — not code-only: NL facts (sticky **15/15**), adversarial ID filler, and multi-needle improve massively over attn stream.
+**VERDICT: `NOVELTY_STRESS_PASS` + `HOP2_NOVELTY_OK`**
+
+- Single-fact NL/code/adv: sticky novelty@512 solid.  
+- **2-hop:** novelty@512 **5/5** multi-seed; valley needs **@1024** for 5/5.  
+- **Multi3:** discovery still the limit on one hard seed (5/6 keys); budget 512→1024 does not help that miss. Valley multi3 remains **0/5**.
+
+### Systems resources (`systems_resources_20260717T130143Z`)
+
+Mid-depth needle, seed 0; full chunked prefill vs sticky novelty stream@512. Peak VRAM = `torch.cuda.max_memory_allocated` after prefill (includes weights).
+
+| L | Arm | Prefill | Peak cache | Decode KV | Peak VRAM |
+|---|-----|---------|------------|-----------|-----------|
+| 4k | full | 1.9 s | 4046 | 569 MB | 8.5 GB |
+| 4k | **novelty@512** | **1.6 s** | **1024** | **72 MB** | **8.3 GB** |
+| 16k | full | 9.2 s | 16330 | 2296 MB | 10.6 GB |
+| 16k | **novelty@512** | **5.9 s** | **1024** | **72 MB** | **8.3 GB** |
+| 40k | full | **1237 s**† | 40916 | 5754 MB | 14.5 GB |
+| 40k | **novelty@512** | **17.6 s** | **1024** | **72 MB** | **8.3 GB** |
+
+† Full 40k chunked prefill was pathologically slow on this WDDM/3090 session (likely paging); still a valid “full path pain” data point. Novelty stays **flat ~8.3 GB** peak VRAM and **72 MB** decode KV at all three lengths.
+
+**VERDICT: `SYSTEMS_FLAT_PEAK`** — sticky novelty stream@512 keeps peak cache/KV/VRAM essentially **independent of \(L\)** while quality holds on the mid needle; full KV grows in all three metrics.
 
 `prefill_auto(..., mode="stream", discovery="novelty")` is now the default stream path.
 

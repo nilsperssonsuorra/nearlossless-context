@@ -73,9 +73,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--depths", default="0.0,0.5,1.0")
     p.add_argument("--seeds", default="0,1,2,3,4")
     p.add_argument("--budgets", default="512")
-    p.add_argument("--scenarios", default="code,nl,adv,multi3")
+    p.add_argument(
+        "--scenarios",
+        default="code,nl,adv,multi3,hop2",
+        help="Comma list: code,nl,adv,multi3,hop2",
+    )
     p.add_argument("--window", type=int, default=SNAPKV_WINDOW)
     p.add_argument("--R", type=int, default=1)
+    p.add_argument(
+        "--max-capsules",
+        type=int,
+        default=12,
+        help="Novelty max capsules (raise for multi-entity)",
+    )
     p.add_argument("--max-new", type=int, default=64)
     p.add_argument("--dtype", default="bfloat16")
     p.add_argument(
@@ -160,6 +170,41 @@ def build_scenario_prompt(
             if pos < 0:
                 pos = 0
             body = body[:pos] + " " + nd["text"] + " " + body[pos:]
+        user = f"Context:\n{body}\n\nQuestion: {question}"
+        return _chat_wrap(tokenizer, user, target_tokens), keys, question
+
+    elif scenario == "hop2":
+        # Two linked facts; answer needs both neighborhoods
+        keys = ["maple-quartz-19"]  # primary success key
+        # Also track link id for partial diagnostics (not required for success)
+        question = (
+            "What is Alice's vault password? "
+            "Use the employee identifier to link records. Answer with the exact password only."
+        )
+        fact1 = "Personnel note: Alice has employee identifier E-4412 in the registry."
+        fact2 = "Security note: the vault password for employee E-4412 is maple-quartz-19."
+
+        def unit(r):
+            if r is None:
+                return FILLER
+            return r.choice(FILLER_VARIANTS)
+
+        hay = _grow_body(tokenizer, body_budget, unit, seed)
+        p1 = int(0.3 * max(len(hay) - 1, 0))
+        p2 = int(0.7 * max(len(hay) - 1, 0))
+        if rng is not None and len(hay) > 64:
+            p1 = max(0, min(len(hay) - 1, p1 + rng.randint(-24, 24)))
+            p2 = max(0, min(len(hay) - 1, p2 + rng.randint(-24, 24)))
+            if p1 > p2:
+                p1, p2 = p2, p1
+        p1 = hay.rfind(" ", 0, p1 + 1)
+        p2 = hay.rfind(" ", 0, p2 + 1)
+        if p1 < 0:
+            p1 = 0
+        if p2 < 0:
+            p2 = 0
+        body = hay[:p2] + " " + fact2 + " " + hay[p2:]
+        body = body[:p1] + " " + fact1 + " " + body[p1:]
         user = f"Context:\n{body}\n\nQuestion: {question}"
         return _chat_wrap(tokenizer, user, target_tokens), keys, question
 
@@ -265,8 +310,8 @@ def main() -> None:
 
     for scenario in scenarios:
         for seed in seeds:
-            # multi3 ignores depth loop — single plant pattern
-            depth_list = [0.5] if scenario == "multi3" else depths
+            # multi3 / hop2 use fixed plant patterns (depth loop unused)
+            depth_list = [0.5] if scenario in ("multi3", "hop2") else depths
             for depth in depth_list:
                 prompt, keys, _q = build_scenario_prompt(
                     tokenizer,
@@ -318,6 +363,7 @@ def main() -> None:
                                     window_size=args.window,
                                     sinks=8,
                                     expand_radius=args.R,
+                                    max_capsules=args.max_capsules,
                                 )
                             elif arm == "oracle_pin":
                                 past, logits, st = prefill_streaming_oracle_pin(

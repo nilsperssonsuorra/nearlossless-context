@@ -9,7 +9,7 @@
 |------------|--------|
 | **H1** Critical spans + local radius \(R^*\) | Supported; bare spans fail; \(R^*=1\) single-needle; larger \(R\) helps multi-entity scorers |
 | **H2** Priority beats volume at fixed bytes | Supported |
-| **H3** Multi-needle / multi-hop | Mechanism holds; scorers need higher budget/R; stream@512 unsafe with distractors |
+| **H3** Multi-needle / multi-hop | Sticky novelty: hop2 **5/5 @512**; multi3 **4/5**; valley multi3 **0/5** |
 
 **Law (working):** near-lossless retrieval under training-free KV compression ≈ retain **critical local neighborhoods** (and all of them if multi-entity), not uniform thinning.
 
@@ -23,8 +23,10 @@
 | Stream valley @1536 | Multi-seed ~93% @4k; long-\(L\) weaker than sticky novelty@512 |
 | Discovery upper bound | oracle_pin stream@512 → **15/15** @4k (**DISCOVERY_IS_THE_GAP**) |
 | Sticky fix | Long-L thrash (24k 6/9) → sticky pins **9/9 through 40k** |
-| Multi-needle | Posthoc R=8@384; novelty stream often wins valley @512 (stress suite 80%) |
-| Adaptive | Default stream `discovery="novelty"`; single-needle stream@512 through 8k/16k |
+| Multi-needle multi3 | sticky novelty **4/5 (80%)** @512; valley **0/5**; residual 1-seed miss |
+| 2-hop | sticky novelty **5/5 @512**; valley 1/5 @512 / 5/5 @1024 |
+| Peak resources | novelty@512: decode KV **72 MB**, peak VRAM **~8.3 GB** flat 4k→40k |
+| Adaptive | Default stream `discovery="novelty"`; single-needle stream@512 through **40k** |
 
 ## Practical “how much fits?”
 
