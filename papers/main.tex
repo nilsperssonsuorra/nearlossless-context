@@ -154,8 +154,9 @@ Check & Result \\
 NL facts (names/places) sticky novelty@512 & \textbf{15/15} multi-seed \\
 Code needles sticky & \textbf{15/15} \\
 Adversarial ID-like filler (pre-sticky) & novelty \textbf{100\%} vs valley \textbf{33\%} \\
-Multi-needle recall\_all @512 & novelty \textbf{4/5 (80\%)}; valley \textbf{0/5}; residual 1-seed \\
+Multi-needle recall\_all @512 & novelty \textbf{5/5} (\texttt{max\_new}$\ge$96); valley \textbf{0/5} \\
 2-hop (Alice$\to$id$\to$password) @512 & novelty \textbf{5/5}; valley \textbf{1/5} (needs @1024 for 5/5) \\
+3-hop + distractors @512 & novelty \textbf{5/5}; valley \textbf{0/5} (needs @1024 for 5/5) \\
 Gemma-4 E4B hybrid novelty@512 & multi-seed \textbf{9/9} @4k (valley needs $\sim$1024) \\
 Qwen2.5 / Llama-3.2 & H1 holds; family-specific posthoc floors \\
 \bottomrule

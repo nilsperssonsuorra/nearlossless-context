@@ -71,8 +71,8 @@ Bench: `experiments/bench_capsules.py`
 |----------|------|
 | 1 | ~~Sticky multi-seed ≥24k–40k~~ **done** — 9/9 @512 through **40k** |
 | 2 | ~~Paper narrative + fig + limitations~~ **done** — `PAPER_DRAFT.md`, `main.pdf` |
-| 3 | ~~Multi-hop + multi3 sticky~~ **done** — hop2 5/5 @512; multi3 4/5 residual |
-| 4 | Residual multi3 seed; optional external bench; sync LaTeX PDF with new tables |
+| 3 | ~~Multi-hop + multi3 sticky~~ **done** — multi3/hop2/hop3 all **5/5 @512** (multi3 needs `max_new≥96`) |
+| 4 | Optional external bench slice; keep paper PDF in sync |
 ## What would count as a win
 
 - Higher multi-seed success than `seed_valley` at the **same** stream budget, or  

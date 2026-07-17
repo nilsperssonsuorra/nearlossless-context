@@ -96,16 +96,19 @@ stream@512, 5 seeds (depths {0,0.5,1} except multi3 mid-only):
 | code (control) | 33% | **100%** | 100% | sticky recheck 15/15 |
 | **nl** (Seraphine / Reykjavik) | 40% | **100%** (was 87% pre-sticky) | 100% | sticky recheck 15/15 |
 | **adv** (ID-like filler flood) | 33% | **100%** | 100% | pre-sticky |
-| **multi3** (3 secrets recall_all) | 0% | **80%** | 40%† | sticky recheck `…T122642Z` still 4/5 |
-| **hop2** (Alice→E-4412→password) | 20% @512 / 100% @1024 | **100% @512** | — | sticky `…T123059Z` 5/5 |
+| **multi3** (3 secrets recall_all) | **0/5** | **5/5 (100%)**‡ | 2/5 @512 / 5/5 @1024 | sticky + `max_new≥96` `…T202222Z` |
+| **hop2** (Alice→id→password) | 1/5 @512 / 5/5 @1024 | **5/5 @512** | — | sticky |
+| **hop3** (3-link + distractors) | **0/5** @512 / 5/5 @1024 | **5/5 @512** | — | sticky `…T202346Z` |
 
-† Oracle_pin@512 multi3 can drop a span under packing/order edge cases (2/5); oracle@1024 = 5/5. Novelty@512 often **beats** oracle@512 packing (4/5 vs 2/5). Raising max_capsules 12→24 did not fix the residual multi3 seed.
+‡ Earlier multi3 “4/5” at `max_new=64` was a **decode-length** miss (seed1 listed 5/6 keys then stopped). Offline novelty covered all 6 keys; with `max_new=96` → **5/5**. Discovery was fine.
 
-**VERDICT: `NOVELTY_STRESS_PASS` + `HOP2_NOVELTY_OK`**
+† Oracle_pin@512 multi3 packing can drop a span (2/5); @1024 = 5/5. Novelty@512 matches oracle@1024 quality on multi3 when decode budget is adequate.
+
+**VERDICT: `NOVELTY_STRESS_PASS` + `MULTI_HOP_NOVELTY_OK` + `MULTI3_NOVELTY_OK`**
 
 - Single-fact NL/code/adv: sticky novelty@512 solid.  
-- **2-hop:** novelty@512 **5/5** multi-seed; valley needs **@1024** for 5/5.  
-- **Multi3:** discovery still the limit on one hard seed (5/6 keys); budget 512→1024 does not help that miss. Valley multi3 remains **0/5**.
+- **2-hop / 3-hop+distractors:** novelty@512 **5/5**; valley fails hard @512 (0–1/5), recovers @1024.  
+- **Multi3:** novelty@512 **5/5** with sufficient `max_new`; valley **0/5**.
 
 ### Systems resources (`systems_resources_20260717T130143Z`)
 

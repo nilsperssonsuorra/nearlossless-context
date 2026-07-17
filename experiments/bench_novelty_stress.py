@@ -86,7 +86,12 @@ def parse_args() -> argparse.Namespace:
         default=12,
         help="Novelty max capsules (raise for multi-entity)",
     )
-    p.add_argument("--max-new", type=int, default=64)
+    p.add_argument(
+        "--max-new",
+        type=int,
+        default=96,
+        help="Decode tokens (multi3 needs ~80+ for full 6-key lists)",
+    )
     p.add_argument("--dtype", default="bfloat16")
     p.add_argument(
         "--arms",
@@ -176,40 +181,77 @@ def build_scenario_prompt(
     elif scenario == "hop2":
         # Two linked facts; answer needs both neighborhoods
         keys = ["maple-quartz-19"]  # primary success key
-        # Also track link id for partial diagnostics (not required for success)
         question = (
             "What is Alice's vault password? "
             "Use the employee identifier to link records. Answer with the exact password only."
         )
-        fact1 = "Personnel note: Alice has employee identifier E-4412 in the registry."
-        fact2 = "Security note: the vault password for employee E-4412 is maple-quartz-19."
+        facts = [
+            (0.3, "Personnel note: Alice has employee identifier E-4412 in the registry."),
+            (0.7, "Security note: the vault password for employee E-4412 is maple-quartz-19."),
+        ]
+        return _plant_facts(
+            tokenizer, body_budget, unit_fn=_filler_unit, seed=seed,
+            facts=facts, question=question, target_tokens=target_tokens, keys=keys,
+        )
 
-        def unit(r):
-            if r is None:
-                return FILLER
-            return r.choice(FILLER_VARIANTS)
-
-        hay = _grow_body(tokenizer, body_budget, unit, seed)
-        p1 = int(0.3 * max(len(hay) - 1, 0))
-        p2 = int(0.7 * max(len(hay) - 1, 0))
-        if rng is not None and len(hay) > 64:
-            p1 = max(0, min(len(hay) - 1, p1 + rng.randint(-24, 24)))
-            p2 = max(0, min(len(hay) - 1, p2 + rng.randint(-24, 24)))
-            if p1 > p2:
-                p1, p2 = p2, p1
-        p1 = hay.rfind(" ", 0, p1 + 1)
-        p2 = hay.rfind(" ", 0, p2 + 1)
-        if p1 < 0:
-            p1 = 0
-        if p2 < 0:
-            p2 = 0
-        body = hay[:p2] + " " + fact2 + " " + hay[p2:]
-        body = body[:p1] + " " + fact1 + " " + body[p1:]
-        user = f"Context:\n{body}\n\nQuestion: {question}"
-        return _chat_wrap(tokenizer, user, target_tokens), keys, question
+    elif scenario == "hop3":
+        # 3-link chain + distractors (same as bench_h3_hop3)
+        keys = ["maple-quartz-19"]
+        question = (
+            "What is Alice's vault password? Follow the chain from Alice's department "
+            "to the vault officer to the password. Answer with the exact password only."
+        )
+        facts = [
+            (0.12, "Assignment: Alice is assigned to Department-7 for the current quarter."),
+            (0.22, "Assignment: Bob is assigned to Department-3 for the current quarter."),
+            (0.35, "Registry: the vault officer for Department-7 has employee identifier E-4412."),
+            (0.45, "Registry: the vault officer for Department-3 has employee identifier E-9901."),
+            (0.55, "Note: Carol also works near Department-7 facilities."),
+            (0.62, "Registry alternate: Department-7 backup officer is E-1100."),
+            (0.75, "Security: the vault password for employee E-4412 is maple-quartz-19."),
+            (0.85, "Security: the vault password for employee E-9901 is pine-nebula-88."),
+            (0.92, "Security: the vault password for employee E-1100 is oak-cipher-42."),
+        ]
+        return _plant_facts(
+            tokenizer, body_budget, unit_fn=_filler_unit, seed=seed,
+            facts=facts, question=question, target_tokens=target_tokens, keys=keys,
+        )
 
     else:
         raise ValueError(scenario)
+
+
+def _filler_unit(r):
+    if r is None:
+        return FILLER
+    return r.choice(FILLER_VARIANTS)
+
+
+def _plant_facts(
+    tokenizer,
+    body_budget: int,
+    *,
+    unit_fn,
+    seed: int | None,
+    facts: list[tuple[float, str]],
+    question: str,
+    target_tokens: int,
+    keys: list[str],
+) -> tuple[str, list[str], str]:
+    hay = _grow_body(tokenizer, body_budget, unit_fn, seed)
+    rng = random.Random(seed) if seed is not None else None
+    body = hay
+    # insert from end so earlier positions stay stable
+    for frac, text in sorted(facts, key=lambda t: -t[0]):
+        pos = int(frac * max(len(body) - 1, 0))
+        if rng is not None and len(body) > 64:
+            pos = max(0, min(len(body) - 1, pos + rng.randint(-16, 16)))
+        pos = body.rfind(" ", 0, pos + 1)
+        if pos < 0:
+            pos = 0
+        body = body[:pos] + " " + text + " " + body[pos:]
+    user = f"Context:\n{body}\n\nQuestion: {question}"
+    return _chat_wrap(tokenizer, user, target_tokens), keys, question
 
     hay = _grow_body(tokenizer, body_budget, unit, seed)
     pos = int(depth * max(len(hay) - 1, 0))
@@ -310,8 +352,10 @@ def main() -> None:
 
     for scenario in scenarios:
         for seed in seeds:
-            # multi3 / hop2 use fixed plant patterns (depth loop unused)
-            depth_list = [0.5] if scenario in ("multi3", "hop2") else depths
+            # multi3 / hop* use fixed plant patterns (depth loop unused)
+            depth_list = (
+                [0.5] if scenario in ("multi3", "hop2", "hop3") else depths
+            )
             for depth in depth_list:
                 prompt, keys, _q = build_scenario_prompt(
                     tokenizer,

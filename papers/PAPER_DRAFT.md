@@ -97,8 +97,9 @@ Posthoc is near-oracle-tight; **stream is not**, until discovery improves.
 | NL facts (names/places) sticky novelty@512 | **15/15** multi-seed |
 | Code needles sticky | **15/15** |
 | Adversarial ID-like filler (pre-sticky) | novelty **100%** vs valley **33%** |
-| Multi-needle recall_all @512 | novelty **4/5 (80%)**; valley **0/5**; residual 1-seed (5/6 keys) |
-| 2-hop (Alice→id→password) @512 | novelty **5/5**; valley **1/5** (valley needs @1024 for 5/5) |
+| Multi-needle recall_all @512 | novelty **5/5** (`max_new≥96`); valley **0/5** |
+| 2-hop (Alice→id→password) @512 | novelty **5/5**; valley **1/5** (needs @1024 for 5/5) |
+| 3-hop + distractors @512 | novelty **5/5**; valley **0/5** (needs @1024 for 5/5) |
 | Gemma-4 E4B hybrid novelty@512 | multi-seed **9/9** @4k (valley needs ~1024) |
 | Qwen2.5 / Llama-3.2 | H1 holds; family-specific posthoc floors |
 
@@ -136,7 +137,7 @@ Peak cache tokens stay **~1024** under novelty stream@512 at all three lengths. 
 |-------------|-----|
 | **General long-context SOTA** | No full RULER / LongBench / InfiniteBench leaderboard evaluation. |
 | **All task types** | Suite is retrieval / needle-class (plus limited multi-needle and NL fact variants). Reasoning chains, code repos, and multi-doc QA are largely untested. |
-| **Oracle-tight online budgets for free** | Sticky novelty ≈ oracle quality on this suite at@512, but multi-secret packing (~80% multi3) and residual suite-alignment remain. |
+| **Oracle-tight online budgets for free** | Sticky novelty matches multi3/hop quality at@512 on this suite when decode budget is adequate; multi-secret packing still stresses oracle_pin@512 (2/5). Suite-alignment of surface novelty remains. |
 | **Production memory stack** | Fake-int8 is logical accounting only; no fused CUDA kernels, paged attention productization, or serving integration. |
 | **Novelty as universal “importance”** | Detector exploits **surface distinctness** vs repetitive filler. Secrets that look like filler, or filler that looks like IDs, can still confuse discovery (adv suite is only a partial stress). |
 | **Large models / long training-free SOTA** | Primary evidence is **~3–4B** instruct models on one GPU class. |
