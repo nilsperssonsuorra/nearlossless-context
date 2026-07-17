@@ -95,6 +95,7 @@ stream@512, 5 seeds (depths {0,0.5,1} except multi3 mid-only):
 |----------|--------|-------------|------------|-------|
 | code (control) | 33% | **100%** | 100% | sticky recheck 15/15 |
 | **nl** (Seraphine / Reykjavik) | 40% | **100%** (was 87% pre-sticky) | 100% | sticky recheck 15/15 |
+| **prose** (soft English, no digits/IDs) | 53% | **100% (15/15)** | 100% | `…T203709Z` — rarity still separates fact from prose hay |
 | **adv** (ID-like filler flood) | 33% | **100%** | 100% | pre-sticky |
 | **multi3** (3 secrets recall_all) | **0/5** | **5/5 (100%)**‡ | 2/5 @512 / 5/5 @1024 | sticky + `max_new≥96` `…T202222Z` |
 | **hop2** (Alice→id→password) | 1/5 @512 / 5/5 @1024 | **5/5 @512** | — | sticky |

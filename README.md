@@ -4,32 +4,46 @@
 
 Private research lab. Not a product. Not “slightly better SnapKV.”
 
+**Read the draft:** [`papers/main.pdf`](papers/main.pdf) · figure: [`papers/figures/fig1_story.png`](papers/figures/fig1_story.png) · findings: [`results/FINDINGS.md`](results/FINDINGS.md)
+
+---
+
+## Results (headline)
+
+On multi-seed retrieval (primary `Qwen3-4B`, RTX 3090):
+
+| Result | Takeaway |
+|--------|----------|
+| **H1′** full / oracle crit±1 / anti-oracle | **15/15 / 15/15 / 0/15** — critical span + local radius is necessary & sufficient |
+| Stream **attention** @512 multi-seed | **~33%** (end-depth only) |
+| Stream **oracle pin** @512 | **15/15** — failures are **discovery**, not peak budget |
+| Stream **sticky novelty** @512 | **~93–100%** @4k; **9/9 multi-seed through 40k**; peak cache **~1k** |
+| multi3 / hop2 / hop3 | novelty **5/5 @512**; valley multi3 & hop3 **0/5** @512 |
+| Peak resources (novelty@512) | decode KV **~72 MB**, peak VRAM **~8.3 GB** **flat** 4k→40k |
+| Transfer | H1 holds on Qwen2.5 / Llama-3.2; Gemma-4 hybrid novelty@512 **9/9** |
+
+**Default path:** `prefill_auto(..., mode="stream", discovery="novelty")` — see `USAGE.md`.
+
+### What we do *not* claim
+
+General long-context SOTA, full RULER/LongBench, production int8 kernels, or that surface novelty is universal “importance.” Suite is retrieval/needle-class; see paper §Limitations.
+
 ---
 
 ## Goal
 
-Run a small open model (starting with **4B**) with **much more context** than naive inference allows, on **consumer hardware**, with **little or no quality loss** vs full key–value (KV) cache.
+Run a small open model (**~4B**) with **much more context** than naive inference allows, on **consumer hardware**, with **little or no quality loss** vs full key–value (KV) cache.
 
 Formally (see `RESEARCH_BRIEF.md`):
 
-> Maximize \(L_\varepsilon\) s.t. quality ≥ \((1-\varepsilon)\times\) full-KV on suite \(\mathcal{S}\), under **≤24 GB** and usable speed.  
-> Secondary: maximize compression ratio at fixed \(L\) with the same ε constraint.
+> Maximize \(L_\varepsilon\) s.t. quality ≥ \((1-\varepsilon)\times\) full-KV on suite \(\mathcal{S}\), under **≤24 GB** and usable speed.
 
 - **ε → 0** on retrieval-critical tasks (exact facts).  
 - **Theory + falsification first** — not “stack known KV tricks.”  
-- Career: strong evidence on a real lab problem helps; it does **not** guarantee any offer.
 
-### What this is not
+### Story in one line
 
-- Rebranding known eviction tricks for a paper delta  
-- Infinite context with perfect dense attention on one 3090 (not realistic as pure dense KV)  
-- Multi-model zoo before the 4B ceiling is understood  
-
-### Paths we care about (in order)
-
-1. **Dense ceiling** — how far full / near-lossless KV (e.g. quant) goes before OOM or thrash  
-2. **Near-lossless compression** — only if it preserves the suite at long \(L\)  
-3. **Memory hierarchy** — hot full KV + warm/cold store, only after dense is exhausted  
+Near-lossless training-free compression ≈ **keep critical local neighborhoods**; online stream fails when **query-unknown discovery** is weak; **sticky surface novelty** closes most of that gap on this suite through **40k** at flat peak cache.
 
 ---
 
@@ -40,10 +54,10 @@ Formally (see `RESEARCH_BRIEF.md`):
 | GPU | NVIDIA RTX 3090 **24 GB** (Windows WDDM) |
 | System RAM | 32 GB |
 | Primary model | [`Qwen/Qwen3-4B-Instruct-2507`](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) — dense full-attention GQA |
-| Transfer (hybrid) | [`google/gemma-4-E4B-it`](https://huggingface.co/google/gemma-4-E4B-it) — sliding+full; H1+posthoc@176 ok; stream needs ~1024/R=2 |
+| Transfer (hybrid) | [`google/gemma-4-E4B-it`](https://huggingface.co/google/gemma-4-E4B-it) — full layers compress; novelty stream@512 multi-seed ok |
 | Avoid (for classic KV work) | `Qwen3.5-4B` hybrid linear+full — different game |
 
-**Workstation policy:** prefer **≤4k** for interactive runs. Longer lengths need chunked prefill / careful jobs so the desktop does not freeze. Use `--allow-long` only when you mean it.
+**Workstation policy:** long \(L\) uses **streaming** (peak cache ~ budget+chunk). Full 40k prefill can thrash WDDM; prefer novelty stream for long jobs.
 
 ---
 
@@ -64,26 +78,20 @@ pip install -r requirements.txt
 
 | Script | Purpose |
 |--------|---------|
-| `experiments/bench_h1_oracle.py` | **H1 kill experiment** (oracle / anti-oracle spans) |
-| `experiments/bench_h1_radius.py` | **H1′** minimum local radius \(R\) around critical spans |
-| `experiments/bench_h2_bytes.py` | **H2** equal-byte: priority (crit±R\*) vs volume |
-| `experiments/bench_scorer_budget.py` | Non-oracle scorer vs oracle at tight budgets |
-| `experiments/bench_l_epsilon.py` | **L_ε** vs length (chunked prefill + budgeted KV) |
-| `experiments/bench_streaming.py` | Online vs posthoc compress (peak cache / VRAM) |
-| `experiments/bench_h3_multi.py` | **H3** multi-needle (2–3 secrets) kill + scorers |
-| `experiments/bench_h3_hop.py` | Two-fact multi-hop smoke (Alice→id→password) |
-| `experiments/bench_h3_hop3.py` | 3-hop + distractors + adaptive policy arms |
-| `experiments/adaptive.py` | Measured R/budget schedule + peak n̂ |
-| `experiments/compress_adaptive.py` | End-to-end posthoc/stream/`prefill_auto` |
-| `experiments/bench_adaptive_e2e.py` | Adaptive E2E across single/multi/hop3 |
-| `experiments/bench_transfer.py` | Second-model H1 + stream transfer smoke |
-| `experiments/scorer_valley.py` | seed_valley + streaming prefill helpers |
-| `experiments/bench_ceiling.py` | Dense full-KV ceiling: VRAM / speed / needle vs \(L\) |
-| `experiments/bench_context_tax.py` | Decode/VRAM tax vs length |
-| `experiments/bench_compare.py` | Full vs recent vs SnapKV-style (≤4k) |
-| `experiments/bench_needle.py` | Needle-in-a-haystack smoke |
-| `experiments/bench_equal_byte.py` | Quality vs KV budget |
-| `experiments/bytebudget.py` | ByteBudget tooling (int8 logical) |
+| `experiments/novelty_detect.py` | **Sticky surface-novelty** stream discovery (default) |
+| `experiments/bench_novelty_stress.py` | code/nl/prose/adv/multi3/hop2/hop3 multi-seed stress |
+| `experiments/bench_novelty_longL.py` | Long-\(L\) multi-seed novelty vs valley |
+| `experiments/bench_systems_resources.py` | Peak VRAM / prefill time / decode KV table |
+| `experiments/bench_paper_rigor.py` | Multi-seed H1 + scorer tax |
+| `experiments/bench_h1_oracle.py` | **H1 kill** (oracle / anti-oracle spans) |
+| `experiments/bench_h1_radius.py` | **H1′** minimum local radius \(R\) |
+| `experiments/bench_h2_bytes.py` | **H2** equal-byte priority vs volume |
+| `experiments/bench_h3_multi.py` / `hop.py` / `hop3.py` | Multi-needle / multi-hop arms |
+| `experiments/compress_adaptive.py` | `prefill_auto` (posthoc/stream, discovery=novelty\|attn) |
+| `experiments/adaptive.py` | Measured R/budget schedule + model floors |
+| `experiments/bench_transfer.py` | Cross-model transfer smoke |
+| `experiments/plot_paper_figures.py` | Regenerates `papers/figures/fig1_story.*` |
+| `papers/build_pdf.ps1` | Builds `papers/main.pdf` from `main.tex` |
 
 ### H1 / H1′ / H2 (theory track)
 
@@ -124,21 +132,11 @@ Outputs: `results/*.csv` + `*.json` (gitignored). Narrative: `results/FINDINGS.m
 
 ---
 
-## Status (lab so far)
+## Status
 
-- Runnable HF lab on 3090; DynamicCache + RoPE/mask footguns documented and fixed for compression paths  
-- **H1 / H1′:** critical spans need local radius \(R^*=1\); bare fact tokens insufficient  
-- **H2:** at fixed bytes, priority (crit±R\*) beats equal/2× volume without critical spans  
-- **Scorer:** **seed_valley@176** ε=0; beats SnapKV@192 at 4k; oracle@**~155**  
-- **L_ε (mid):** full and posthoc@176 reach **8k**; decode KV **~27 MB vs ~1.1 GB**  
-- **Streaming @1536:** reliable **~24k**, observed **≥40k** single-needle (~2k peak cache, ~9 GB)  
-- **USAGE.md** — how to call `prefill_auto`
-- **H3 multi-needle:** posthoc **R=8@384**; stream **R=8@1024** (vs R=1@2048)  
-- **Two-hop / 3-hop+distractors:** critical spans hold; **stream@512 can pick distractors**  
-- **Adaptive E2E:** posthoc auto ok; stream needs entity prior; peak n̂ after sink-mask  
-- Chunked prefill makes long context interactive on WDDM  
+Core arc is **measured and written up** (mechanism → discovery gap → sticky novelty → long-\(L\) + multi-hop + systems table). See headline results above and `papers/main.pdf`.
 
-**Next (goal-aligned):** stream-time n̂; residual tax; int8 / second model / writeup.
+**Next (optional):** out-of-suite / prose stresses; external long-context slices; packaging polish.
 
 ---
 
@@ -146,13 +144,16 @@ Outputs: `results/*.csv` + `*.json` (gitignored). Narrative: `results/FINDINGS.m
 
 | File | Content |
 |------|---------|
-| `USAGE.md` | How to call `prefill_auto` + length guide |
-| `RESEARCH_SUMMARY.md` | Short hire-aligned summary of results |
-| `RESEARCH_BRIEF.md` | North-star brief + status |
-| `papers/NOTES.md` | Paper cards (SnapKV, PyramidKV, Ada-KV, KIVI, RocketKV, …) |
-| `results/FINDINGS.md` | Experimental findings |
+| **`papers/main.pdf`** | **Readable paper draft (start here)** |
+| `papers/PAPER_DRAFT.md` | Markdown twin of the draft |
+| `papers/figures/fig1_story.png` | H1 / discovery / long-\(L\) / peak-cache figure |
+| `USAGE.md` | `prefill_auto` + length guide |
+| `RESEARCH_SUMMARY.md` | Short hire-aligned summary |
+| `results/FINDINGS.md` | Full experimental tables / verdicts |
+| `RESEARCH_BRIEF.md` | North-star brief |
+| `papers/CAPSULES.md` | Fact-capsule / novelty research notes |
 
-Related work is **crowded** (eviction + KV quant). We treat known methods as **baselines/tools**. Success is **raising \(L\) at ε≈0**, not renaming SnapKV.
+Related work is **crowded** (eviction + KV quant). Success here is **raising \(L\) at ε≈0 with honest multi-seed claims**, not renaming SnapKV.
 
 ---
 
@@ -162,9 +163,10 @@ Private: [nearlossless-context](https://github.com/nilsperssonsuorra/nearlossles
 
 ```text
 nearlossless-context/
-  experiments/     # benches + methods
-  papers/          # notes
-  results/         # local CSVs + FINDINGS.md
-  RESEARCH_BRIEF.md
+  experiments/     # benches + novelty + adaptive API
+  papers/          # main.tex / main.pdf / figures / notes
+  results/         # FINDINGS.md (+ local CSVs gitignored)
+  USAGE.md
+  RESEARCH_SUMMARY.md
   requirements.txt
 ```

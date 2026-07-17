@@ -72,7 +72,8 @@ Bench: `experiments/bench_capsules.py`
 | 1 | ~~Sticky multi-seed ≥24k–40k~~ **done** — 9/9 @512 through **40k** |
 | 2 | ~~Paper narrative + fig + limitations~~ **done** — `PAPER_DRAFT.md`, `main.pdf` |
 | 3 | ~~Multi-hop + multi3 sticky~~ **done** — multi3/hop2/hop3 all **5/5 @512** (multi3 needs `max_new≥96`) |
-| 4 | Optional external bench slice; keep paper PDF in sync |
+| 4 | ~~Prose soft-fact stress~~ **done** — 15/15 novelty vs valley 53% |
+| 5 | Optional true external bench (RULER/LongBench slice) |
 ## What would count as a win
 
 - Higher multi-seed success than `seed_valley` at the **same** stream budget, or  

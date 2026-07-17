@@ -57,6 +57,35 @@ NL_Q = (
     "Answer with the exact name and city only."
 )
 
+# Soft prose fact: no digits / code-like IDs — harder for surface novelty
+PROSE_NEEDLE = (
+    "Field note: the courier was told to wait beside the weathered oak near the river bend "
+    "until the heron landed twice."
+)
+PROSE_KEYS = ["weathered oak", "heron"]
+PROSE_Q = (
+    "Where was the courier told to wait, and what bird signal was mentioned? "
+    "Answer with the exact place phrase and bird only."
+)
+PROSE_FILLER_UNITS = [
+    (
+        "The afternoon light settled across the valley as carts moved along the packed earth road. "
+        "Traders spoke of distant markets and the weather turning cooler by evening. "
+    ),
+    (
+        "Along the path, sparrows flitted between hedges while a farmer mended a wooden gate. "
+        "Nothing unusual was reported in the ledger for that quiet stretch of country. "
+    ),
+    (
+        "By the stream, children skipped stones and an old dog slept under a canvas awning. "
+        "The air smelled of wet leaves after a brief shower had passed. "
+    ),
+    (
+        "Further on, stone walls marked the edge of pasture where sheep grazed without hurry. "
+        "A distant bell marked the hour, then the countryside returned to its soft murmur. "
+    ),
+]
+
 # Adversarial filler: looks ID-like / code-like so novelty is flooded
 ADV_FILLER_UNITS = [
     "Telemetry tag CODE-ALPHA-1200 status nominal; checksum ZETA-991-beta verified. ",
@@ -75,8 +104,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--budgets", default="512")
     p.add_argument(
         "--scenarios",
-        default="code,nl,adv,multi3,hop2",
-        help="Comma list: code,nl,adv,multi3,hop2",
+        default="code,nl,adv,multi3,hop2,hop3,prose",
+        help="Comma list: code,nl,adv,prose,multi3,hop2,hop3",
     )
     p.add_argument("--window", type=int, default=SNAPKV_WINDOW)
     p.add_argument("--R", type=int, default=1)
@@ -141,6 +170,15 @@ def build_scenario_prompt(
             if r is None:
                 return FILLER
             return r.choice(FILLER_VARIANTS)
+
+    elif scenario == "prose":
+        # Soft English fact in prose hay — no digits / code IDs
+        needle, keys, question = PROSE_NEEDLE, PROSE_KEYS, PROSE_Q
+
+        def unit(r):
+            if r is None:
+                return PROSE_FILLER_UNITS[0]
+            return r.choice(PROSE_FILLER_UNITS)
 
     elif scenario == "adv":
         needle, keys, question = CODE_NEEDLE, CODE_KEYS, CODE_Q
@@ -220,6 +258,18 @@ def build_scenario_prompt(
     else:
         raise ValueError(scenario)
 
+    # code / nl / prose / adv: single needle at depth
+    hay = _grow_body(tokenizer, body_budget, unit, seed)
+    pos = int(depth * max(len(hay) - 1, 0))
+    if rng is not None and len(hay) > 64:
+        pos = max(0, min(len(hay) - 1, pos + rng.randint(-32, 32)))
+    pos = hay.rfind(" ", 0, pos + 1)
+    if pos < 0:
+        pos = 0
+    body = hay[:pos] + " " + needle + " " + hay[pos:]
+    user = f"Context:\n{body}\n\nQuestion: {question}"
+    return _chat_wrap(tokenizer, user, target_tokens), keys, question
+
 
 def _filler_unit(r):
     if r is None:
@@ -250,17 +300,6 @@ def _plant_facts(
         if pos < 0:
             pos = 0
         body = body[:pos] + " " + text + " " + body[pos:]
-    user = f"Context:\n{body}\n\nQuestion: {question}"
-    return _chat_wrap(tokenizer, user, target_tokens), keys, question
-
-    hay = _grow_body(tokenizer, body_budget, unit, seed)
-    pos = int(depth * max(len(hay) - 1, 0))
-    if rng is not None and len(hay) > 64:
-        pos = max(0, min(len(hay) - 1, pos + rng.randint(-32, 32)))
-    pos = hay.rfind(" ", 0, pos + 1)
-    if pos < 0:
-        pos = 0
-    body = hay[:pos] + " " + needle + " " + hay[pos:]
     user = f"Context:\n{body}\n\nQuestion: {question}"
     return _chat_wrap(tokenizer, user, target_tokens), keys, question
 
