@@ -20,6 +20,7 @@ On multi-seed retrieval (primary `Qwen3-4B`, RTX 3090):
 | Stream **sticky novelty** @512 | **~93–100%** @4k; **9/9 multi-seed through 40k**; peak cache **~1k** |
 | multi3 / hop2 / hop3 | novelty **5/5 @512**; valley multi3 & hop3 **0/5** @512 |
 | multidoc (6 titled docs) | novelty **15/15 @512**; valley/oracle_pin **5/15** |
+| External-style slice (10 mixed QA @~4k) | novelty **10/10** hits = full; valley **0/10** |
 | Peak resources (novelty@512) | decode KV **~72 MB**, peak VRAM **~8.3 GB** **flat** 4k→40k |
 | Transfer | H1 holds on Qwen2.5 / Llama-3.2; Gemma-4 hybrid novelty@512 **9/9** |
 
@@ -137,7 +138,9 @@ Outputs: `results/*.csv` + `*.json` (gitignored). Narrative: `results/FINDINGS.m
 
 Core arc is **measured and written up** (mechanism → discovery gap → sticky novelty → long-\(L\) + multi-hop + systems table). See headline results above and `papers/main.pdf`.
 
-**Next (optional):** out-of-suite / prose stresses; external long-context slices; packaging polish.
+**Next (optional):** public LongBench/RULER data files; anti-novelty failure suite; product polish.
+
+**Portfolio one-pager:** [`PORTFOLIO.md`](PORTFOLIO.md)
 
 ---
 

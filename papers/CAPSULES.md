@@ -74,7 +74,8 @@ Bench: `experiments/bench_capsules.py`
 | 3 | ~~Multi-hop + multi3 sticky~~ **done** — multi3/hop2/hop3 all **5/5 @512** (multi3 needs `max_new≥96`) |
 | 4 | ~~Prose soft-fact stress~~ **done** — 15/15 novelty vs valley 53% |
 | 5 | ~~Multidoc (6 docs)~~ **done** — novelty 15/15; valley/oracle 5/15 |
-| 6 | Optional public LongBench/RULER slice (download-heavy) |
+| 6 | ~~External-style mixed QA slice~~ **done** — novelty 10/10 = full; valley 0/10 @512 |
+| 7 | Optional public LongBench parquet load when hub data files available |
 ## What would count as a win
 
 - Higher multi-seed success than `seed_valley` at the **same** stream budget, or  

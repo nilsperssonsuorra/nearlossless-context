@@ -80,6 +80,7 @@ See `USAGE.md` and `results/FINDINGS.md`.
 | stream valley@512 / @1536 @4k | **33% / ~93%** |
 | stream novelty@512 @4k | **93% (14/15)**; stress NL/prose/multidoc/multi3/hop **strong** |
 | multidoc (6 docs) | novelty **15/15** @512; valley/oracle_pin **5/15** |
+| External-style mixed QA | novelty **10/10** = full hits; valley **0/10** @512 (~4k padded) |
 | sticky novelty@512 long-L 3×3 | **9/9 @16k, 24k, 32k, 40k** (v0 non-sticky 24k was 6/9) |
 
 Draft: `papers/PAPER_DRAFT.md` · **PDF:** `papers/main.pdf` (`build_pdf.ps1` / `main.tex`) · fig: `papers/figures/fig1_story.png`

@@ -135,6 +135,22 @@ Mid-depth needle, seed 0; full chunked prefill vs sticky novelty stream@512. Pea
 
 Docs: `papers/CAPSULES.md` · `experiments/novelty_detect.py` · `bench_novelty_stress.py`.
 
+### External-style slice (`external_slice_20260717T210638Z`)
+
+Not a full LongBench/RULER leaderboard (HF LongBench dataset scripts no longer load on current `datasets`). Instead: **10 diverse offline QA items** (wiki-ish, ops, multi-doc, science, legal, …) **padded to ~4k** so stream@512 actually compresses.
+
+| Arm | Mean token-F1 | Substring hit rate |
+|-----|---------------|--------------------|
+| full | 0.37 | **10/10** |
+| stream_valley@512 | 0.01 | **0/10** |
+| **stream_novelty@512** | **0.37** | **10/10** |
+
+Peak cache under stream arms: **~1024**. Novelty **matches full** on hit rate; valley loses the facts under compression.
+
+**VERDICT: `EXTERNAL_STYLE_SLICE_OK`** — sticky novelty transfers beyond pure needle templates to mixed-domain short answers under forced long context. Public LongBench load remains future work (parquet data files / pinned datasets version).
+
+Bench: `experiments/bench_external_slice.py` · portfolio: `PORTFOLIO.md`.
+
 ### Long-L multi-seed novelty (`novelty_longL_20260716T180614Z` + sticky `…T210746Z`)
 
 **Protocol:** 3 seeds × 3 depths = **9 cells** per L.
