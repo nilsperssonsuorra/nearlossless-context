@@ -160,7 +160,9 @@ Multi-needle recall\_all @512 & novelty \textbf{5/5} (\texttt{max\_new}$\ge$96);
 Prose soft fact (no digits) @512 & novelty \textbf{15/15}; valley 53\% \\
 Multidoc (6 titled docs) @512 & novelty \textbf{15/15}; valley/oracle\_pin \textbf{5/15} \\
 External-style mixed QA (10$\times$$\sim$4k) & novelty \textbf{10/10} hits (= full); valley \textbf{0/10} \\
-Public LongBench slice (60 @4k truncate) & full F1 \textbf{0.28}/hit 23\%; novelty \textbf{0.19}/10\%; valley \textbf{0.18}/8\% \\
+Public LongBench slice (60 @4k truncate) & full F1 \textbf{0.28}/hit 23--25\%; novelty \textbf{0.18--0.19}/10\%; valley \textbf{0.18}/8\% \\
+Posthoc query-aware UB (same 60) & posthoc@512 \textbf{0.95$\times$} full F1; @1024/2048 $\sim$\textbf{1.0$\times$} (peak=$L$) \\
+query\_hold Pareto (hold$\times$final) & best h2048$\to$f1024 $\approx$\textbf{0.92$\times$} full @ peak $\sim$2.5k; novelty@512 \textbf{0.64$\times$} @1k \\
 Gemma-4 E4B hybrid novelty@512 & multi-seed \textbf{9/9} @4k (valley needs $\sim$1024) \\
 Qwen2.5 / Llama-3.2 & H1 holds; family-specific posthoc floors \\
 \bottomrule
@@ -202,6 +204,7 @@ Peak cache under novelty stays $\sim$1024 tokens at all three lengths.
   \item On this \textbf{controlled multi-seed retrieval suite}, critical$\pm R^*$ is necessary/sufficient for $\varepsilon\!\approx\!0$ single-fact recall.
   \item Stream failures at moderate budget are primarily a \textbf{query-unknown discovery} problem (oracle-online upper bound).
   \item Sticky surface novelty \textbf{closes most of that gap} through \textbf{40k} multi-seed at peak cache $\sim$1k on the primary model, with transfer smoke to other small instruct models including hybrid Gemma-4.
+  \item On public LongBench, \textbf{posthoc query-aware compression $\approx$ full} at final $B{=}512$ (peak=$L$), while online novelty lags; \textbf{query\_hold} recovers a measured Pareto (best $\sim$0.92$\times$ full F1 at peak $\sim$2.5k).
 \end{itemize}
 
 \subsection{What we do \emph{not} claim}
@@ -248,7 +251,7 @@ Peak VRAM $=$ final decode KV &
 
 \section{Conclusion}
 
-Near-lossless training-free KV compression on retrieval tasks is structured by \textbf{critical local neighborhoods}. When the question is known, a simple attention valley scorer approximates the oracle keep set with small tax. When the question is \textbf{not} known---as in online streaming---the binding constraint is \textbf{discovery}. Sticky surface novelty is a lightweight query-unknown detector that, on our multi-seed suite, restores high success through \textbf{40k} context at a \textbf{flat $\sim$1k-token peak cache}, transferring to hybrid Gemma-4 at primary-class budgets. The honest next steps are broader tasks and multi-entity packing---not larger single-needle grids alone.
+Near-lossless training-free KV compression on retrieval tasks is structured by \textbf{critical local neighborhoods}. When the question is known, a simple attention valley scorer approximates the oracle keep set with small tax---and on a public LongBench slice, posthoc query-aware compression reaches $\sim$full quality at final $B{=}512$. When the question is \textbf{not} known---as in online streaming---the binding constraint is \textbf{discovery}/retention before the query. Sticky surface novelty is a lightweight query-unknown detector that, on our multi-seed suite, restores high success through \textbf{40k} context at a \textbf{flat $\sim$1k-token peak cache}. On open long-doc QA, quality becomes a \textbf{Pareto} in peak cache (query-hold $\sim$0.92$\times$ full F1 at $\sim$2.5k peak). Honest next steps are better mid-stream pins and multi-entity packing---not larger single-needle grids alone.
 
 \section*{Reproducibility}
 

@@ -4,8 +4,18 @@ Small external-style eval slice (not full LongBench leaderboard).
 Loads a public HF split when available; otherwise falls back to a bundled
 offline multi-doc / long-prose set so the bench is always runnable.
 
-Arms: full, stream_valley@B, stream_novelty@B
+Arms: full, valley, novelty, hybrid, query_hold, posthoc
 Metric: token-level F1 vs reference answer(s) + exact substring hit.
+
+Paper-priority runs:
+  # 1) Posthoc query-aware upper bound (full prefill → compress@B)
+  python experiments/bench_external_slice.py --source longbench --n 60 \\
+    --arms full,posthoc --budgets 512,1024,2048
+
+  # 2) Query-hold Pareto (hold × final)
+  python experiments/bench_external_slice.py --source longbench --n 60 \\
+    --arms full,novelty,query_hold --budgets 512 \\
+    --hold-budgets 1024,2048,4096 --final-budgets 512,1024
 
 Usage:
   python experiments/bench_external_slice.py
@@ -23,6 +33,7 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -36,7 +47,10 @@ from novelty_detect import (  # noqa: E402
     prefill_streaming_novelty_pin,
     prefill_streaming_query_hold,
 )
-from scorer_valley import prefill_streaming_valley  # noqa: E402
+from scorer_valley import (  # noqa: E402
+    compress_with_seed_valley,
+    prefill_streaming_valley,
+)
 from snapkv import cache_seq_len, prefill_chunked  # noqa: E402
 from utils import write_csv  # noqa: E402
 
@@ -206,7 +220,13 @@ def parse_args() -> argparse.Namespace:
         default="multifieldqa_en,qasper,hotpotqa",
         help="LongBench jsonl stems (comma list)",
     )
-    p.add_argument("--budget", type=int, default=512)
+    p.add_argument("--budget", type=int, default=512, help="Default stream/posthoc budget")
+    p.add_argument(
+        "--budgets",
+        default="",
+        help="Comma list of budgets for posthoc/valley/novelty/hybrid "
+        "(overrides --budget when set)",
+    )
     p.add_argument("--max-ctx", type=int, default=4096)
     p.add_argument("--max-new", type=int, default=64)
     p.add_argument("--window", type=int, default=SNAPKV_WINDOW)
@@ -214,15 +234,84 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--arms",
         default="full,valley,novelty,hybrid,query_hold",
-        help="Comma list: full,valley,novelty,hybrid,query_hold",
+        help="Comma list: full,valley,novelty,hybrid,query_hold,posthoc",
     )
     p.add_argument(
         "--hold-budget",
         type=int,
         default=2048,
-        help="Mid-stream hold cache for query_hold arm",
+        help="Default mid-stream hold cache for query_hold",
+    )
+    p.add_argument(
+        "--hold-budgets",
+        default="",
+        help="Comma list of hold budgets for query_hold Pareto (overrides --hold-budget)",
+    )
+    p.add_argument(
+        "--final-budgets",
+        default="",
+        help="Comma list of final budgets for query_hold (default: --budgets or --budget)",
+    )
+    p.add_argument(
+        "--expand-radius",
+        type=int,
+        default=1,
+        help="seed_valley / pin expand radius for posthoc and stream arms",
     )
     return p.parse_args()
+
+
+def _parse_int_list(s: str, default: list[int] | None = None) -> list[int]:
+    if not s or not str(s).strip():
+        return list(default or [])
+    return [int(x.strip()) for x in str(s).split(",") if x.strip()]
+
+
+def expand_arm_specs(
+    arms: list[str],
+    budgets: list[int],
+    hold_budgets: list[int],
+    final_budgets: list[int],
+) -> list[dict[str, Any]]:
+    """Expand arm names into concrete run specs with unique labels."""
+    specs: list[dict[str, Any]] = []
+    for arm in arms:
+        if arm == "full":
+            specs.append({"kind": "full", "label": "full"})
+        elif arm == "posthoc":
+            for b in budgets:
+                specs.append(
+                    {
+                        "kind": "posthoc",
+                        "label": f"posthoc@{b}",
+                        "budget": b,
+                    }
+                )
+        elif arm in ("valley", "novelty", "hybrid"):
+            for b in budgets:
+                specs.append(
+                    {
+                        "kind": arm,
+                        "label": f"{arm}@{b}",
+                        "budget": b,
+                    }
+                )
+        elif arm == "query_hold":
+            for h in hold_budgets:
+                for f in final_budgets:
+                    specs.append(
+                        {
+                            "kind": "query_hold",
+                            "label": f"query_hold@h{h}_f{f}",
+                            "hold_budget": h,
+                            "final_budget": f,
+                        }
+                    )
+        else:
+            raise ValueError(
+                f"Unknown arm {arm!r}; use full,valley,novelty,hybrid,query_hold,posthoc"
+            )
+    return specs
 
 
 def normalize_answer(s: str) -> str:
@@ -428,9 +517,112 @@ def load_items(
 
 
 @torch.inference_mode()
+def run_arm_spec(
+    model,
+    tokenizer,
+    input_ids: torch.Tensor,
+    spec: dict[str, Any],
+    *,
+    window: int,
+    expand_radius: int,
+) -> tuple[Any, torch.Tensor, int | None, dict[str, Any]]:
+    """Run one arm spec; return (past, logits, peak_cache, extra_meta)."""
+    kind = spec["kind"]
+    meta: dict[str, Any] = {"kind": kind}
+    if kind == "full":
+        past, logits = prefill_chunked(model, input_ids, chunk_size=512)
+        return past, logits, cache_seq_len(past), meta
+    if kind == "posthoc":
+        b = int(spec["budget"])
+        past, logits = prefill_chunked(model, input_ids, chunk_size=512)
+        peak = cache_seq_len(past)  # peak = full L for posthoc upper bound
+        past, keep = compress_with_seed_valley(
+            model,
+            input_ids,
+            past,
+            budget=b,
+            window_size=window,
+            sinks=8,
+            expand_radius=expand_radius,
+        )
+        meta.update(
+            {
+                "budget": b,
+                "final_cache": cache_seq_len(past),
+                "n_keep": len(keep),
+                "peak_is_full_prefill": True,
+            }
+        )
+        return past, logits, peak, meta
+    if kind == "valley":
+        b = int(spec["budget"])
+        past, logits, st = prefill_streaming_valley(
+            model,
+            input_ids,
+            stream_budget=b,
+            final_budget=b,
+            chunk_size=512,
+            window_size=window,
+            expand_radius=expand_radius,
+        )
+        peak = st.get("peak_cache_tokens", st.get("peak_cache"))
+        meta["budget"] = b
+        return past, logits, peak, meta
+    if kind == "novelty":
+        b = int(spec["budget"])
+        past, logits, st = prefill_streaming_novelty_pin(
+            model,
+            tokenizer,
+            input_ids,
+            stream_budget=b,
+            final_budget=b,
+            chunk_size=512,
+            window_size=window,
+            expand_radius=expand_radius,
+        )
+        meta["budget"] = b
+        return past, logits, st.get("peak_cache"), meta
+    if kind == "hybrid":
+        b = int(spec["budget"])
+        past, logits, st = prefill_streaming_hybrid_pin(
+            model,
+            tokenizer,
+            input_ids,
+            stream_budget=b,
+            final_budget=b,
+            chunk_size=512,
+            window_size=window,
+            expand_radius=expand_radius,
+        )
+        meta["budget"] = b
+        return past, logits, st.get("peak_cache"), meta
+    if kind == "query_hold":
+        h = int(spec["hold_budget"])
+        f = int(spec["final_budget"])
+        past, logits, st = prefill_streaming_query_hold(
+            model,
+            tokenizer,
+            input_ids,
+            final_budget=f,
+            hold_budget=h,
+            chunk_size=512,
+            window_size=window,
+            expand_radius=expand_radius,
+        )
+        meta.update({"hold_budget": h, "final_budget": f})
+        return past, logits, st.get("peak_cache"), meta
+    raise ValueError(kind)
+
+
+@torch.inference_mode()
 def main() -> None:
     args = parse_args()
     arms = [x.strip() for x in args.arms.split(",") if x.strip()]
+    budgets = _parse_int_list(args.budgets, default=[args.budget])
+    hold_budgets = _parse_int_list(args.hold_budgets, default=[args.hold_budget])
+    final_budgets = _parse_int_list(args.final_budgets, default=budgets)
+    specs = expand_arm_specs(arms, budgets, hold_budgets, final_budgets)
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if args.dtype == "bfloat16" else torch.float16
 
@@ -452,8 +644,10 @@ def main() -> None:
         print("No items to evaluate.", flush=True)
         return
 
+    labels = [s["label"] for s in specs]
     print(
-        f"source={src} n={len(items)} budget={args.budget} arms={arms} "
+        f"source={src} n={len(items)} budgets={budgets} hold={hold_budgets} "
+        f"final={final_budgets} arms={arms} specs={labels} "
         f"max_ctx={args.max_ctx} tasks={args.tasks}",
         flush=True,
     )
@@ -480,58 +674,18 @@ def main() -> None:
             flush=True,
         )
 
-        for arm in arms:
+        for spec in specs:
+            label = spec["label"]
             try:
                 t0 = time.perf_counter()
-                if arm == "full":
-                    past, logits = prefill_chunked(model, input_ids, chunk_size=512)
-                    peak = cache_seq_len(past)
-                elif arm == "valley":
-                    past, logits, st = prefill_streaming_valley(
-                        model,
-                        input_ids,
-                        stream_budget=args.budget,
-                        final_budget=args.budget,
-                        chunk_size=512,
-                        window_size=args.window,
-                    )
-                    peak = st.get("peak_cache_tokens", st.get("peak_cache"))
-                elif arm == "novelty":
-                    past, logits, st = prefill_streaming_novelty_pin(
-                        model,
-                        tokenizer,
-                        input_ids,
-                        stream_budget=args.budget,
-                        final_budget=args.budget,
-                        chunk_size=512,
-                        window_size=args.window,
-                    )
-                    peak = st.get("peak_cache")
-                elif arm == "hybrid":
-                    past, logits, st = prefill_streaming_hybrid_pin(
-                        model,
-                        tokenizer,
-                        input_ids,
-                        stream_budget=args.budget,
-                        final_budget=args.budget,
-                        chunk_size=512,
-                        window_size=args.window,
-                    )
-                    peak = st.get("peak_cache")
-                elif arm == "query_hold":
-                    past, logits, st = prefill_streaming_query_hold(
-                        model,
-                        tokenizer,
-                        input_ids,
-                        final_budget=args.budget,
-                        hold_budget=args.hold_budget,
-                        chunk_size=512,
-                        window_size=args.window,
-                    )
-                    peak = st.get("peak_cache")
-                else:
-                    raise ValueError(arm)
-
+                past, logits, peak, meta = run_arm_spec(
+                    model,
+                    tokenizer,
+                    input_ids,
+                    spec,
+                    window=args.window,
+                    expand_radius=args.expand_radius,
+                )
                 toks = greedy_generate(
                     model,
                     past,
@@ -546,19 +700,26 @@ def main() -> None:
                 dt = time.perf_counter() - t0
                 row = {
                     "id": item["id"],
+                    "task": item.get("task", ""),
                     "source": item.get("source", src),
-                    "arm": arm if arm == "full" else f"{arm}@{args.budget}",
+                    "arm": label,
                     "seq_len": seq_len,
                     "f1": round(f1, 4),
                     "substr_hit": hit,
                     "peak_cache": peak,
+                    "final_cache": meta.get("final_cache"),
                     "seconds": round(dt, 3),
                     "pred": pred[:200].replace("\n", " "),
                     "gold": " | ".join(item["answers"])[:200],
                 }
+                if "budget" in meta:
+                    row["budget"] = meta["budget"]
+                if "hold_budget" in meta:
+                    row["hold_budget"] = meta["hold_budget"]
+                    row["final_budget"] = meta["final_budget"]
                 rows.append(row)
                 print(
-                    f"  {row['arm']}: f1={f1:.2f} hit={hit} peak={peak} t={dt:.1f}s "
+                    f"  {label}: f1={f1:.2f} hit={hit} peak={peak} t={dt:.1f}s "
                     f"pred={row['pred'][:80]!r}",
                     flush=True,
                 )
@@ -569,37 +730,42 @@ def main() -> None:
                 rows.append(
                     {
                         "id": item["id"],
-                        "arm": arm,
+                        "arm": label,
                         "f1": 0.0,
                         "substr_hit": False,
                         "status": f"ERR:{type(e).__name__}",
                         "pred": str(e)[:120],
                     }
                 )
-                print(f"  {arm}: ERR {e}", flush=True)
+                print(f"  {label}: ERR {e}", flush=True)
 
     # Summary
     print("\n=== SUMMARY (mean F1 / substr hit rate) ===", flush=True)
     summary = []
-    for arm in arms:
-        label = arm if arm == "full" else f"{arm}@{args.budget}"
-        arm_rows = [r for r in rows if r.get("arm") == label or r.get("arm") == arm]
+    for spec in specs:
+        label = spec["label"]
+        arm_rows = [r for r in rows if r.get("arm") == label]
         if not arm_rows:
             continue
         mean_f1 = sum(float(r.get("f1") or 0) for r in arm_rows) / len(arm_rows)
         hit_rate = sum(1 for r in arm_rows if r.get("substr_hit")) / len(arm_rows)
+        peaks = [r.get("peak_cache") for r in arm_rows if r.get("peak_cache") is not None]
+        mean_peak = (sum(float(p) for p in peaks) / len(peaks)) if peaks else None
         print(
-            f"  {label}: mean_f1={mean_f1:.3f} substr_hit={hit_rate:.3f} n={len(arm_rows)}",
+            f"  {label}: mean_f1={mean_f1:.3f} substr_hit={hit_rate:.3f} "
+            f"n={len(arm_rows)}"
+            + (f" mean_peak={mean_peak:.0f}" if mean_peak is not None else ""),
             flush=True,
         )
-        summary.append(
-            {
-                "arm": label,
-                "mean_f1": round(mean_f1, 4),
-                "substr_hit_rate": round(hit_rate, 4),
-                "n": len(arm_rows),
-            }
-        )
+        entry: dict[str, Any] = {
+            "arm": label,
+            "mean_f1": round(mean_f1, 4),
+            "substr_hit_rate": round(hit_rate, 4),
+            "n": len(arm_rows),
+        }
+        if mean_peak is not None:
+            entry["mean_peak_cache"] = round(mean_peak, 1)
+        summary.append(entry)
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out_json = RESULTS_DIR / f"external_slice_{ts}.json"
@@ -608,8 +774,12 @@ def main() -> None:
         "ts": ts,
         "model": args.model,
         "source": src,
-        "budget": args.budget,
+        "budgets": budgets,
+        "hold_budgets": hold_budgets,
+        "final_budgets": final_budgets,
         "max_ctx": args.max_ctx,
+        "expand_radius": args.expand_radius,
+        "specs": labels,
         "summary": summary,
         "rows": rows,
     }

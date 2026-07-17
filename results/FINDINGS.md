@@ -208,10 +208,57 @@ Same 60 LongBench items. **query_hold**: hybrid pins with **hold_budget=2048** (
 - Holding more tokens until the question is present **clearly helps** LongBench (hit 10%→17%, F1 0.19→0.22).  
 - Tradeoff: peak cache ~**2.5×** novelty@512. Systems story becomes a **Pareto** (quality vs peak), not free lunch at peak~1k.  
 - Still not full (0.76× F1); remaining gap = discovery of non-novel answer spans + 4B/truncate/greedy ceilings.  
-- Next: hold 4096 / final 1024, embedding pins, or posthoc query-aware after full prefill (upper bound on discovery given peak=L).
 
 API: `discovery="query_hold"` · `prefill_streaming_query_hold(hold_budget=2048)`.  
 Loader: `data/longbench/` via `data.zip` (gitignored).
+
+### Posthoc query-aware upper bound (`external_slice_20260717T222040Z`)
+
+**Paper priority 1.** Same 60 LongBench items. **Posthoc** = full prefill (peak = \(L\)) → `seed_valley` compress to final budget with the **question in the obs window**. Separates “can query-aware discovery work?” from “can stream keep tokens online?”
+
+| Arm | Mean F1 | Substr hit | Peak | F1 / full |
+|-----|---------|------------|------|-----------|
+| full | **0.282** | **25% (15/60)** | =L (~3876) | 1.00× |
+| **posthoc@512** | **0.267** | **27% (16/60)** | =L | **0.95×** |
+| **posthoc@1024** | **0.284** | **28% (17/60)** | =L | **~1.01×** |
+| **posthoc@2048** | **0.285** | **27% (16/60)** | =L | **~1.01×** |
+
+**VERDICT: `POSTHOC_NEAR_FULL`**
+
+- With the question available, seed_valley keeps **≈ full quality at final B=512** (and matches/exceeds full mean F1 at 1024/2048).  
+- LongBench stream gap is therefore **not** “scorer cannot find answers when query-aware.”  
+- Binding constraint for online paths is **retention before the query exists** (or packing under mid-stream budget).  
+- Peak remains full \(L\) for posthoc — this is an **upper bound on discovery quality**, not a free systems win.
+
+### Query-hold Pareto sweep (`external_slice_20260717T225301Z`)
+
+**Paper priority 2.** Same 60 items. hold ∈ {1024, 2048, 4096} × final ∈ {512, 1024}. Anchors: full, novelty@512.
+
+| Arm | Mean F1 | Substr hit | Mean peak | F1 / full |
+|-----|---------|------------|-----------|-----------|
+| full | **0.282** | **25%** | ~3876 | 1.00× |
+| novelty@512 | 0.179 | 10% | **1024** | 0.64× |
+| query_hold@h1024_f512 | 0.199 | 18% | 1536 | 0.70× |
+| query_hold@h1024_f1024 | 0.231 | 22% | 1536 | 0.82× |
+| query_hold@h2048_f512 | 0.212 | 17% | ~2531 | 0.75× |
+| **query_hold@h2048_f1024** | **0.260** | **22%** | **~2531** | **0.92×** |
+| query_hold@h4096_f512 | 0.212 | 18% | ~3876 | 0.75× |
+| query_hold@h4096_f1024 | 0.249 | **28%** | ~3876 | 0.88× |
+
+**VERDICT: `QUERY_HOLD_PARETO`**
+
+- **Final budget matters:** at fixed hold, final **1024 ≫ 512** on F1 (and usually hit).  
+- **Sweet spot:** hold **2048 → final 1024** ≈ **0.92× full F1** at peak ~**2.5k** (between novelty@1k and full@4k).  
+- Hold **4096 → final 1024** raises hit rate to **28%** (matches/beats full hit) but F1 slightly below h2048_f1024; peak ≈ full \(L\).  
+- Stream still **below posthoc** at comparable final budgets (posthoc@512 ≈ 0.95× with peak=\(L\); best online ≈ 0.92× with peak ~2.5k). Residual online gap is mid-stream pin quality under hold, not query-aware re-rank alone.  
+- Paper systems claim is quantitative: **Pareto of peak cache vs F1**, not free lunch at peak~1k on open long-doc QA.
+
+Combined story for writeup:
+
+1. **Mechanism (suite):** sticky novelty closes discovery gap through 40k @ ~1k peak.  
+2. **Public LB:** novelty ≲ valley ≪ full at peak~1k.  
+3. **Upper bound:** posthoc query-aware ≈ full @ final 512 → discovery *can* work.  
+4. **Systems lever:** query_hold trades peak for quality; **h2048→f1024 ≈ 0.92× full**.
 
 ### Long-L multi-seed novelty (`novelty_longL_20260716T180614Z` + sticky `…T210746Z`)
 

@@ -77,6 +77,8 @@ Bench: `experiments/bench_capsules.py`
 | 6 | ~~External-style mixed QA slice~~ **done** — novelty 10/10 = full; valley 0/10 @512 |
 | 7 | ~~Public LongBench slice (60 items)~~ **done** — novelty ≳ valley but ≪ full (honest) |
 | 8 | ~~Hybrid query-aware stream~~ **done** — hit 12% vs novelty 10% on LB; still ≪ full |
+| 9 | ~~Posthoc query-aware UB on same 60 LB~~ **done** — posthoc@512 **0.95×** full F1; @1024/2048 ~**1.0×** (`…T222040Z`) |
+| 10 | ~~query_hold Pareto (hold×final)~~ **done** — best **h2048→f1024 ≈ 0.92×** full @ peak~2.5k (`…T225301Z`) |
 ## What would count as a win
 
 - Higher multi-seed success than `seed_valley` at the **same** stream budget, or  

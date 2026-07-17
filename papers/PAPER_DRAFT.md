@@ -103,9 +103,37 @@ Posthoc is near-oracle-tight; **stream is not**, until discovery improves.
 | Prose soft fact (no digits) @512 | novelty **15/15**; valley **53%** |
 | Multidoc (6 titled docs) @512 | novelty **15/15**; valley/oracle_pin **5/15** |
 | External-style mixed QA (10 items, ~4k padded) | novelty **10/10** hits (= full); valley **0/10** |
-| **Public LongBench** (60: multifieldqa_en+qasper+hotpotqa @4k) | full F1 **0.28** / hit 23%; novelty **0.19** / 10%; valley **0.18** / 8%; hybrid **0.19** / **12%** |
+| **Public LongBench** (60: multifieldqa_en+qasper+hotpotqa @4k) | full F1 **0.28** / hit 23–25%; novelty **0.18–0.19** / 10%; valley **0.18** / 8%; hybrid **0.19** / **12%** |
+| **Posthoc query-aware UB** (same 60; full prefill→seed_valley) | posthoc@512 **0.95×** full F1; @1024/2048 **~1.0×** (peak=\(L\)) — discovery *can* match full |
+| **query_hold Pareto** (hold×final) | best **h2048→f1024 ≈ 0.92×** full F1 @ peak ~2.5k; novelty@512 **0.64×** @ peak 1k |
 | Gemma-4 E4B hybrid novelty@512 | multi-seed **9/9** @4k (valley needs ~1024) |
 | Qwen2.5 / Llama-3.2 | H1 holds; family-specific posthoc floors |
+
+### LongBench decomposition (paper priorities 1–2)
+
+Same 60 items, max_ctx=4096, Qwen3-4B greedy (`external_slice_20260717T222040Z`, `…T225301Z`).
+
+**Posthoc upper bound** (question known; peak = full \(L\)):
+
+| Arm | Mean F1 | Hit | F1 / full |
+|-----|---------|-----|-----------|
+| full | 0.282 | 25% | 1.00× |
+| posthoc@512 | 0.267 | 27% | **0.95×** |
+| posthoc@1024 | 0.284 | 28% | **~1.01×** |
+| posthoc@2048 | 0.285 | 27% | **~1.01×** |
+
+**Stream Pareto** (peak cache vs quality):
+
+| Arm | Mean F1 | Hit | Mean peak | F1 / full |
+|-----|---------|-----|-----------|-----------|
+| novelty@512 | 0.179 | 10% | 1024 | 0.64× |
+| query_hold h1024→f512 | 0.199 | 18% | 1536 | 0.70× |
+| query_hold h1024→f1024 | 0.231 | 22% | 1536 | 0.82× |
+| query_hold h2048→f512 | 0.212 | 17% | ~2531 | 0.75× |
+| **query_hold h2048→f1024** | **0.260** | **22%** | **~2531** | **0.92×** |
+| query_hold h4096→f1024 | 0.249 | 28% | ~3876 | 0.88× |
+
+**Interpretation.** Open long-doc QA is not a failure of query-aware scoring (posthoc ≈ full). It is an **online retention** problem. query_hold makes the tradeoff quantitative: ~0.9× full F1 needs ~2.5k peak, not ~1k.
 
 ### Systems resources (peak VRAM / latency)
 
@@ -134,6 +162,7 @@ Peak cache tokens stay **~1024** under novelty stream@512 at all three lengths. 
 - On this **controlled multi-seed retrieval suite**, critical±\(R^*\) is necessary/sufficient for ε≈0 single-fact recall.  
 - Stream failures at moderate budget are primarily a **query-unknown discovery** problem (oracle-online upper bound).  
 - Sticky surface novelty **closes most of that gap** through **40k** multi-seed at peak cache ~1k on the primary model, with transfer smoke to other small instruct models including hybrid Gemma-4.  
+- On public LongBench, **posthoc query-aware ≈ full** at final B=512 (peak=\(L\)); online quality is a **Pareto** in peak cache (query_hold best ≈ **0.92×** full F1 @ ~2.5k).  
 
 ### 6.2 What we do **not** claim
 
