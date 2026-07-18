@@ -1,6 +1,6 @@
 # Portfolio note — nearlossless-context
 
-**One-liner:** Near-lossless long context on a 24 GB GPU by keeping **critical local neighborhoods**, diagnosing stream failures as a **query-unknown discovery** problem, and closing most of that gap with **sticky surface novelty** (multi-seed **40k** at peak cache ~1k tokens).
+**One-liner:** Near-lossless long context on a 24 GB GPU by keeping **critical local neighborhoods**, diagnosing stream failures as a **query-unknown discovery** problem, closing most of that gap with **sticky surface novelty** (multi-seed **40k** at peak ~1k), and showing on public LongBench that **posthoc ≈ full** while online quality is a **peak/quality Pareto** (~0.92× full F1 at ~2.5k peak).
 
 ---
 

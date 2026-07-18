@@ -1,9 +1,9 @@
 # Near-Lossless Long Context under Fixed VRAM via Critical-Span Retention
 
-**Status:** portfolio / workshop-style draft (narrative + figure)  
+**Status:** workshop / arXiv-style draft  
 **Lab:** RTX 3090 24 GB · primary `Qwen/Qwen3-4B-Instruct-2507`  
 **Repo:** nearlossless-context  
-**Last updated:** 2026-07-16  
+**Last updated:** 2026-07-18  
 
 > Primary multi-seed tables: `results/paper_rigor_*`, `novelty_*`, `FINDINGS.md`.  
 > **Figure:** [`figures/fig1_story.png`](figures/fig1_story.png) (regenerate: `python experiments/plot_paper_figures.py`).  
@@ -13,11 +13,12 @@
 
 ## Abstract
 
-Long-context inference is limited by KV-cache memory. Training-free eviction methods shrink the cache, but it is often unclear *which* tokens are necessary for near–full-KV quality. On a multi-seed controlled retrieval suite (Qwen3-4B, RTX 3090), we show three linked results:
+Long-context inference is limited by KV-cache memory. Training-free eviction methods shrink the cache, but it is often unclear *which* tokens are necessary for near–full-KV quality, and whether online streaming fails from insufficient peak budget or from weak **query-unknown discovery**. On a multi-seed controlled retrieval suite (Qwen3-4B, RTX 3090), we show:
 
 1. **Structure (H1′).** Retaining critical fact tokens plus a small local radius \(R^*=1\) (with attention sinks and a recent/question window) is **necessary and sufficient** for ε≈0 single-fact recall: oracle **15/15**, anti-oracle **0/15**, full KV **15/15** (5 seeds × 3 depths @4k).
-2. **Discovery gap.** Online streaming at a moderate peak budget fails under multi-seed hay not because the budget is too small, but because **query-unknown discovery is weak**: attention stream@512 is **33%**, while perfect online pin of critical±R is **15/15** at the same peak.
-3. **Closing the gap.** A **surface novelty detector** (within-prefix rarity + digit/ID-like cues; no final question) with **sticky pin packing** reaches **~93%** multi-seed @4k and **100%** (3×3) through **40k** at stream@512—peak cache **~1k tokens**, flat in \(L\).
+2. **Discovery gap.** Online streaming at moderate peak fails under multi-seed hay not because the budget is too small, but because discovery is weak: attention stream@512 is **33%**, while perfect online pin of critical±R is **15/15** at the same peak.
+3. **Closing the gap (suite).** A **surface novelty detector** (within-prefix rarity + digit/ID-like cues; no final question) with **sticky pin packing** reaches **~93%** multi-seed @4k and **100%** (3×3) through **40k** at stream@512—peak cache **~1k tokens**, flat in \(L\).
+4. **Public long-doc QA (decomposition).** On a 60-item LongBench slice, sticky novelty lags full (~0.64× F1 at peak ~1k). A **posthoc query-aware upper bound** recovers **0.95–1.0×** full F1 at final \(B\in\{512,1024\}\). **Query-hold** streaming trades peak for quality, best ≈**0.92×** full F1 at peak ~2.5k.
 
 The critical-span mechanism transfers across Qwen2.5, Llama-3.2, and hybrid Gemma-4 (full layers). We do **not** claim general long-context SOTA; see §Limitations.
 
@@ -35,17 +36,18 @@ L_\varepsilon \;=\; \max\{\, L : Q(M,L) \ge (1-\varepsilon)\,Q(\mathrm{Full},L) 
 
 under **peak** cache / VRAM constraints—not only final decode size after a full prefill.
 
-**Claim.** Near-lossless training-free KV compression is better understood as **retaining critical local neighborhoods** (and discovering them online before the question exists) than as uniform thinning or posthoc score ranking alone.
+**Claim.** Near-lossless training-free KV compression is better understood as **retaining critical local neighborhoods** and **discovering them online before the question exists** than as uniform thinning or posthoc score ranking alone. On open long-document QA, the residual gap is largely an **online retention / peak-cache Pareto**, not a failure of query-aware scoring once the question is available.
 
 ---
 
-## 2. Related work (sketch)
+## 2. Related work
 
-- **Eviction / selection:** H2O, SnapKV, pyramid and related training-free keepers.  
-- **Hybrid attention:** sliding-window + full layers (e.g. Gemma-4); full-layer KV still dominates compressible state.  
-- **Quantization** (KIVI, etc.): complementary; we use fake-int8 only for logical byte accounting.  
+- **Training-free eviction / selection:** H2O (heavy hitters), StreamingLLM (attention sinks + recent), Scissorhands / TOVA, SnapKV and pyramid-style keepers (obs-window importance). These mainly address scoring when queries or observation windows exist.
+- **Streaming systems:** peak cache / VRAM under chunked prefill; hybrid sliding+full attention still leaves full-layer KV compressible.
+- **Quantization:** KIVI-style KV quant is complementary; we use fake-int8 only for logical byte accounting.
+- **Benchmarks:** needles / multi-hop synthetics vs LongBench-style public long-doc QA.
 
-**Positioning.** Mechanism + workstation \(L_\varepsilon\), not a leaderboard chase. Novelty is a **query-unknown discovery** layer on top of H1′ retention, not a new attention kernel.
+**Positioning.** Mechanism + discovery diagnosis + workstation \(L_\varepsilon\), not a new attention kernel or LongBench SOTA chase. Novelty is a **query-unknown discovery** layer on top of H1′ retention; query_hold makes open-QA quality a measured peak/quality curve.
 
 ---
 

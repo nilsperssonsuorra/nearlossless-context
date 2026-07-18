@@ -21,7 +21,9 @@ On multi-seed retrieval (primary `Qwen3-4B`, RTX 3090):
 | multi3 / hop2 / hop3 | novelty **5/5 @512**; valley multi3 & hop3 **0/5** @512 |
 | multidoc (6 titled docs) | novelty **15/15 @512**; valley/oracle_pin **5/15** |
 | External-style slice (10 mixed QA @~4k) | novelty **10/10** hits = full; valley **0/10** |
-| Public LongBench (60 @4k truncate) | full F1 **0.28**; novelty **0.19**; valley **0.18** (honest gap) |
+| Public LongBench (60 @4k truncate) | full F1 **0.28**; novelty **~0.18** (honest gap vs suite) |
+| Posthoc LB upper bound (same 60) | **0.95–1.0×** full F1 @ final 512–2048 (peak=\(L\)) |
+| query_hold Pareto on LB | best **~0.92×** full F1 @ peak **~2.5k** (h2048→f1024) |
 | Peak resources (novelty@512) | decode KV **~72 MB**, peak VRAM **~8.3 GB** **flat** 4k→40k |
 | Transfer | H1 holds on Qwen2.5 / Llama-3.2; Gemma-4 hybrid novelty@512 **9/9** |
 
@@ -46,7 +48,7 @@ Formally (see `RESEARCH_BRIEF.md`):
 
 ### Story in one line
 
-Near-lossless training-free compression ≈ **keep critical local neighborhoods**; online stream fails when **query-unknown discovery** is weak; **sticky surface novelty** closes most of that gap on this suite through **40k** at flat peak cache.
+Near-lossless training-free compression ≈ **keep critical local neighborhoods**; online stream fails when **query-unknown discovery** is weak; **sticky surface novelty** closes most of that gap on this suite through **40k** at flat peak cache; on public LongBench, **posthoc ≈ full** while online quality is a **peak/quality Pareto** (query_hold ~0.92× @ ~2.5k peak).
 
 ---
 
