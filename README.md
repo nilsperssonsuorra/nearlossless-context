@@ -141,7 +141,7 @@ Outputs: `results/*.csv` + `*.json` (gitignored). Narrative: `results/FINDINGS.m
 
 Core arc is **measured and written up** (mechanism → discovery gap → sticky novelty → long-\(L\) + multi-hop + systems table). See headline results above and `papers/main.pdf`.
 
-**Next (optional):** public LongBench/RULER data files; anti-novelty failure suite; product polish.
+**Next (optional):** arXiv submit; workshop CFP; optional SnapKV baseline arm / methods expansion — not more needle grids.
 
 **Portfolio one-pager + paste blurb:** [`PORTFOLIO.md`](PORTFOLIO.md)
 

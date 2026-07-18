@@ -41,7 +41,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import PRIMARY_MODEL_ID, RESULTS_DIR, SNAPKV_WINDOW  # noqa: E402
-from decode_utils import greedy_generate  # noqa: E402
+from decode_utils import greedy_generate, refresh_logits_after_compress  # noqa: E402
 from novelty_detect import (  # noqa: E402
     prefill_streaming_hybrid_pin,
     prefill_streaming_novelty_pin,
@@ -686,6 +686,14 @@ def main() -> None:
                     window=args.window,
                     expand_radius=args.expand_radius,
                 )
+                # After any compress path, first-token logits must match final KV
+                # (not pre-compress / pre-final-tighten logits). Full prefill is
+                # already consistent.
+                if spec["kind"] != "full":
+                    past, logits = refresh_logits_after_compress(
+                        model, past, input_ids, seq_len=seq_len
+                    )
+                    meta["logits_refreshed"] = True
                 toks = greedy_generate(
                     model,
                     past,
@@ -739,21 +747,26 @@ def main() -> None:
                 )
                 print(f"  {label}: ERR {e}", flush=True)
 
-    # Summary
-    print("\n=== SUMMARY (mean F1 / substr hit rate) ===", flush=True)
+    # Summary (exclude hard failures so ERR rows do not silently deflate means)
+    print("\n=== SUMMARY (mean F1 / substr hit rate; ERR excluded) ===", flush=True)
     summary = []
     for spec in specs:
         label = spec["label"]
         arm_rows = [r for r in rows if r.get("arm") == label]
-        if not arm_rows:
+        ok_rows = [r for r in arm_rows if not str(r.get("status", "")).startswith("ERR")]
+        n_err = len(arm_rows) - len(ok_rows)
+        if not ok_rows:
+            print(f"  {label}: no successful rows (err={n_err})", flush=True)
+            summary.append({"arm": label, "mean_f1": None, "n": 0, "n_err": n_err})
             continue
-        mean_f1 = sum(float(r.get("f1") or 0) for r in arm_rows) / len(arm_rows)
-        hit_rate = sum(1 for r in arm_rows if r.get("substr_hit")) / len(arm_rows)
-        peaks = [r.get("peak_cache") for r in arm_rows if r.get("peak_cache") is not None]
+        mean_f1 = sum(float(r.get("f1") or 0) for r in ok_rows) / len(ok_rows)
+        hit_rate = sum(1 for r in ok_rows if r.get("substr_hit")) / len(ok_rows)
+        peaks = [r.get("peak_cache") for r in ok_rows if r.get("peak_cache") is not None]
         mean_peak = (sum(float(p) for p in peaks) / len(peaks)) if peaks else None
         print(
             f"  {label}: mean_f1={mean_f1:.3f} substr_hit={hit_rate:.3f} "
-            f"n={len(arm_rows)}"
+            f"n={len(ok_rows)}"
+            + (f" err={n_err}" if n_err else "")
             + (f" mean_peak={mean_peak:.0f}" if mean_peak is not None else ""),
             flush=True,
         )
@@ -761,7 +774,8 @@ def main() -> None:
             "arm": label,
             "mean_f1": round(mean_f1, 4),
             "substr_hit_rate": round(hit_rate, 4),
-            "n": len(arm_rows),
+            "n": len(ok_rows),
+            "n_err": n_err,
         }
         if mean_peak is not None:
             entry["mean_peak_cache"] = round(mean_peak, 1)

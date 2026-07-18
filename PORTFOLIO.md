@@ -37,7 +37,7 @@ I studied near-lossless KV compression on a 24 GB GPU and showed that stream f
 1. **Structure:** critical tokens + small radius \(R^*=1\) are necessary and sufficient for ε≈0 single-fact recall (multi-seed 15/15 / 0/15 kill).
 2. **Discovery gap:** perfect online pin hits 15/15 at stream@512 where attention valley only gets ~33%.
 3. **Sticky novelty:** query-unknown surface detector restores multi-seed quality through **40k** at flat peak cache ~1k; multi3/hop2/hop3/prose/multidoc stress strong vs valley.
-4. **External-style / public slice:** offline mixed QA — novelty **10/10** (= full) vs valley **0/10**. **Public LongBench** (60 items: multifieldqa_en, qasper, hotpotqa @4k truncate): full mean F1 **0.28** / hit 23%; novelty **0.19** / 10%; valley **0.18** / 8% — novelty ≳ valley but **does not match full** on general long-doc QA.
+4. **External-style / public slice:** offline mixed QA — novelty **10/10** (= full) vs valley **0/10**. **Public LongBench** (60 items @4k truncate): full mean F1 **0.28** / hit **25%**; novelty **~0.18** / 10% — ≪ full online; **posthoc query-aware ~0.95× full** @ final 512; **query_hold best ~0.92×** @ peak ~2.5k.
 5. **Systems:** decode KV ~72 MB and peak VRAM ~8.3 GB stay flat 4k→40k under novelty stream@512.
 
 ## Do not overclaim

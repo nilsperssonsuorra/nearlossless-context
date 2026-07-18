@@ -260,6 +260,12 @@ Combined story for writeup:
 3. **Upper bound:** posthoc query-aware ≈ full @ final 512 → discovery *can* work.  
 4. **Systems lever:** query_hold trades peak for quality; **h2048→f1024 ≈ 0.92× full**.
 
+### Eval harness hardening (2026-07-18, peer review)
+
+- **`refresh_logits_after_compress`** in `decode_utils.py`: after posthoc/stream compress, re-forward the last prompt token so first-token logits match compressed KV (not stale full/hold logits). Wired in `bench_external_slice.py` for all non-`full` arms.
+- **Summary means exclude `ERR:` rows** and report `n_err` (avoids silent deflation when one arm OOMs).
+- Published LongBench tables above (`…T222040Z`, `…T225301Z`) predate logits refresh; offline smoke after the fix matches full/posthoc/novelty on short items. Re-run LB only if you need post-fix point estimates.
+
 ### Long-L multi-seed novelty (`novelty_longL_20260716T180614Z` + sticky `…T210746Z`)
 
 **Protocol:** 3 seeds × 3 depths = **9 cells** per L.

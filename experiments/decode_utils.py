@@ -73,6 +73,66 @@ def prefill_method(
 
 
 @torch.inference_mode()
+def refresh_logits_after_compress(
+    model,
+    past: Any,
+    input_ids: torch.Tensor,
+    *,
+    seq_len: int | None = None,
+) -> tuple[Any, torch.Tensor]:
+    """
+    Recompute next-token logits under the *compressed* KV cache.
+
+    After posthoc/stream compress, cached K/V no longer match the prefill
+    logits (which were computed on full or pre-final cache). We assume the
+    last prompt token is kept in the recent window (always true for our
+    scorers), drop the last cache position, and re-forward that token at its
+    absolute RoPE index so the first generated token uses compressed context.
+
+    Returns (past_with_last_token_restored, next_token_logits [B, vocab]).
+    """
+    from snapkv import clone_dynamic_cache, is_dynamic_cache, is_sliding_layer
+
+    if past is None or not is_dynamic_cache(past):
+        raise TypeError("refresh_logits_after_compress expects DynamicCache past")
+    T = int(seq_len if seq_len is not None else input_ids.shape[-1])
+    if T < 1:
+        raise ValueError("empty input_ids")
+    last_ids = input_ids[:, T - 1 : T]
+    device = last_ids.device
+
+    past_work = clone_dynamic_cache(past)
+    for layer in past_work.layers:
+        if layer.keys is None:
+            continue
+        if is_sliding_layer(layer):
+            # Keep sliding window as-is; cumulative_length stays absolute if set.
+            continue
+        s = int(layer.keys.shape[-2])
+        if s <= 1:
+            continue
+        layer.keys = layer.keys[:, :, :-1, :].contiguous()
+        layer.values = layer.values[:, :, :-1, :].contiguous()
+
+    pos = T - 1
+    position_ids = torch.tensor([[pos]], device=device, dtype=torch.long)
+    cache_position = torch.tensor([pos], device=device, dtype=torch.long)
+    kwargs: dict[str, Any] = {
+        "input_ids": last_ids,
+        "past_key_values": past_work,
+        "position_ids": position_ids,
+        "use_cache": True,
+    }
+    try:
+        kwargs["cache_position"] = cache_position
+        out = model(**kwargs)
+    except TypeError:
+        kwargs.pop("cache_position", None)
+        out = model(**kwargs)
+    return out.past_key_values, out.logits[:, -1, :]
+
+
+@torch.inference_mode()
 def greedy_generate(
     model,
     past: Any,

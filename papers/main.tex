@@ -43,7 +43,7 @@ Long-context inference is limited by KV-cache memory. Training-free eviction met
   \item \textbf{Discovery gap.}
   Online streaming at moderate peak fails under multi-seed hay not because the budget is too small, but because discovery is weak: attention stream@512 is \textbf{33\%}, while perfect online pin of critical$\pm R$ is \textbf{15/15} at the same peak.
   \item \textbf{Closing the gap (suite).}
-  A \textbf{surface novelty detector} (within-prefix rarity + digit/ID-like cues; no final question) with \textbf{sticky pin packing} reaches $\sim$\textbf{93\%} multi-seed @4k and \textbf{100\%} ($3\times3$) through \textbf{40k} at stream@512---peak cache $\sim$\textbf{1k tokens}, flat in $L$.
+  A \textbf{surface novelty detector} (within-prefix rarity + digit/ID-like cues; no final question) reaches $\sim$\textbf{93\%} multi-seed @4k; with \textbf{sticky pin packing} it holds \textbf{9/9} cells ($3$ seeds $\times$ $3$ depths) through \textbf{40k} at stream@512---peak cache $\sim$\textbf{1k tokens}, flat in $L$.
   \item \textbf{Public long-doc QA (decomposition).}
   On a 60-item LongBench slice, sticky novelty lags full ($\sim$0.64$\times$ F1 at peak $\sim$1k). A \textbf{posthoc query-aware upper bound} (full prefill $\to$ compress) recovers \textbf{0.95--1.0$\times$} full F1 at final $B\in\{512,1024\}$, proving discovery \emph{can} work when the question is known. \textbf{Query-hold} streaming trades peak for quality, best $\approx$\textbf{0.92$\times$} full F1 at peak $\sim$2.5k.
 \end{enumerate}
@@ -68,45 +68,55 @@ Near-lossless training-free KV compression is better understood as \textbf{retai
 \label{sec:related}
 
 \paragraph{Training-free KV eviction and selection.}
-A large line of work compresses the KV cache without fine-tuning by dropping low-scoring tokens. \textbf{H2O}~\cite{zhang2023h2o} keeps heavy hitters under accumulated attention; \textbf{StreamingLLM}~\cite{xiao2023streamingllm} observes attention sinks and retains initial tokens plus a sliding recent window; \textbf{Scissorhands}~\cite{liu2023scissorhands} and \textbf{TOVA}~\cite{orenzain2024tova} prune by recency/attention proxies; \textbf{SnapKV}~\cite{li2024snapkv} and pyramid-style keepers~\cite{cai2024pyramidkv} select important prefix tokens using observation-window attention, often with clustering or hierarchical budgets. These methods primarily address \emph{which scores to use when queries (or an observation window) exist}. Our contribution is complementary: multi-seed \textbf{kill tests} that isolate \emph{necessary keep sets}, an explicit \textbf{query-unknown discovery gap} for online streaming, and a lightweight surface detector + sticky packing that closes that gap on retrieval suites at flat peak cache.
+A large line of work compresses the KV cache without fine-tuning by dropping low-scoring tokens. \textbf{H2O}~\cite{zhang2023h2o} keeps heavy hitters under accumulated attention; \textbf{StreamingLLM}~\cite{xiao2023streamingllm} observes attention sinks and retains initial tokens plus a sliding recent window; \textbf{Scissorhands}~\cite{liu2023scissorhands} and \textbf{TOVA}~\cite{orenzain2024tova} prune by recency/attention proxies; \textbf{SnapKV}~\cite{li2024snapkv} and pyramid-style keepers~\cite{cai2024pyramidkv} select important prefix tokens using observation-window attention, often with clustering or hierarchical budgets. Query-aware vs query-agnostic selection (e.g.\ adaptive budgets conditioned on the prompt) is an active axis; our online setting is deliberately \textbf{query-unknown until the question arrives}. These methods primarily address \emph{which scores to use when queries (or an observation window) exist}. Our contribution is complementary: multi-seed \textbf{kill tests} that isolate \emph{necessary keep sets}, an explicit \textbf{query-unknown discovery gap} for online streaming, and a lightweight surface detector + sticky packing that closes that gap on retrieval suites at flat peak cache.
 
 \paragraph{Streaming and long-context systems.}
-Chunked prefill and stream compression cap \textbf{peak} memory rather than only final decode size. We report peak cache tokens, peak VRAM, and prefill latency on a consumer GPU, in the spirit of systems-oriented long-context work rather than leaderboard-only evaluation. Hybrid architectures (sliding-window + full-attention layers; e.g.\ Gemma-4 class models) still leave full-layer KV as the dominant compressible state; we compress full layers only and keep bookkeeping for hybrid score passes.
+Chunked prefill and stream compression cap \textbf{peak} memory rather than only final decode size. We report peak cache tokens, peak VRAM, and prefill latency on a consumer GPU, in the spirit of systems-oriented long-context work rather than leaderboard-only evaluation. Hybrid architectures (sliding-window + full-attention layers; e.g.\ Gemma-4 class models) still leave full-layer KV as the dominant compressible state; we compress full layers only and keep bookkeeping for hybrid score passes. Retrieval-style KV / page caches (InfLLM-class systems) are complementary infrastructure; we study \emph{which} tokens to retain under a fixed peak budget on a single GPU.
 
 \paragraph{Quantization.}
 KV quantization (e.g.\ \textbf{KIVI}~\cite{liu2024kivi}) reduces bytes per retained token and is complementary to eviction. We use fake-int8 only for logical byte accounting in some benches; quality results use bf16 caches unless noted.
 
 \paragraph{Benchmarks.}
-Needle-in-a-haystack and multi-hop synthetic suites stress retrieval under controlled depth/seed. \textbf{LongBench}~\cite{bai2024longbench} and related public suites (RULER, InfiniteBench) stress general long-document and multi-doc QA. We use a \textbf{fixed 60-item LongBench slice} (not a full leaderboard) to separate suite success from open QA, and to measure posthoc upper bounds and peak/quality Pareto curves.
+Needle-in-a-haystack and multi-hop synthetic suites stress retrieval under controlled depth/seed. \textbf{LongBench}~\cite{bai2024longbench} and related public suites (RULER, InfiniteBench) stress general long-document and multi-doc QA. We use a \textbf{fixed 60-item LongBench slice} (not a full leaderboard) to separate suite success from open QA, and to measure posthoc upper bounds and peak/quality Pareto curves. We do \textbf{not} report full RULER/InfiniteBench leaderboards.
 
 \paragraph{Positioning.}
 We are not proposing a new attention kernel or claiming SnapKV-beating LongBench SOTA. The paper's contribution is a \textbf{mechanism + discovery diagnosis + workstation $L_\varepsilon$ operating point}, with honest public-data limits and a quantitative online Pareto.
 
-\section{Methods (short)}
+\section{Methods}
+\label{sec:methods}
 
 \paragraph{Task (suite).}
-Needle-in-haystack style secrets in seeded filler; depths $\{0,0.5,1\}$; success = exact key recall (greedy decode). Stresses: NL facts, multi-needle, multi-hop, prose soft facts, multidoc.
+Needle-in-haystack style secrets in seeded filler; depths $\{0,0.5,1\}$; success = exact key recall (greedy decode). Stresses: NL facts, multi-needle, multi-hop, prose soft facts, multidoc. Multi-seed protocols: $5\times3$ at 4k; $3\times3$ at long $L$.
 
 \paragraph{H1$'$ keep set.}
-sinks $\cup$ critical$\pm R$ $\cup$ recent/question window. Kill arms: full, oracle\_r1, anti\_oracle.
+\[
+K^\star \;=\; \mathrm{sinks} \;\cup\; \mathrm{critical}\pm R \;\cup\; \mathrm{recent/question}.
+\]
+Kill arms: full, oracle\_r1 ($K^\star$), anti\_oracle (drop critical$\pm R$). $R^*=1$ is the measured default radius.
 
-\paragraph{Posthoc scorer.}
-\texttt{seed\_valley}: shared obs-window attention $\to$ seeds $\to$ contiguous valley + $\pm R$. Used both for suite tax tables and as the LongBench \textbf{posthoc upper bound} after full prefill.
+\paragraph{Posthoc scorer (\texttt{seed\_valley}).}
+After full prefill of length $T$, score the last observation window of size $W$ (default $W{=}128$, covering the question when present) with shared attention votes over the prefix. Select seed peaks, grow contiguous valleys while score $\ge 0.25\times$ seed, expand $\pm R$, force-keep sinks and the last $W$ tokens, pack to budget $B$. Used for suite tax tables and as the LongBench \textbf{posthoc upper bound} (full prefill $\to$ compress@$B$; peak cache $=T$).
 
 \paragraph{Streaming.}
-Chunked prefill; compress when cache $>$ budget; peak $\approx$ budget + chunk.
+Chunked prefill (chunk size 512); whenever cache exceeds the active budget, compress online. Peak cache $\approx$ budget + one chunk. Absolute RoPE indices continue from original $T$ at decode time after compress.
 
 \paragraph{Oracle-online upper bound.}
-Force-keep critical$\pm R$ whenever still in cache (perfect discovery).
+Force-keep critical$\pm R$ whenever still in cache (perfect discovery) at the same peak class as stream@512.
 
 \paragraph{Surface novelty (query-unknown).}
-Per-token score from within-prefix rarity, first occurrence, and surface cues (digits, ID-like pieces). Expand peaks $\pm R$ into pin sets. \textbf{Sticky} registry: once discovered, pins stay until evicted; packing ranks pins by score under budget (sinks + recent reserved).
+For each prefix position $i$ before the final question exists, score token $i$ from within-prefix rarity / first occurrence plus surface cues (digits, ID-like pieces). Take local peaks, expand $\pm R$ into pin sets. \textbf{Sticky} registry: once a pin is discovered it remains until packing must drop it; packing ranks pins by score under budget with sinks + recent reserved. This is a lightweight detector, not a learned importance head.
 
 \paragraph{Query-hold (systems lever).}
-Mid-stream hybrid pins under a larger \texttt{hold\_budget}, then query-aware tighten to \texttt{final\_budget} once the question is in the observation window. Peak $\approx$ hold + chunk; quality trades against peak.
+Mid-stream: hybrid pins (novelty $\cup$ attention peaks) under \texttt{hold\_budget}. Near end / final pass: query-aware re-rank and tighten to \texttt{final\_budget} once the question is in the observation window. Peak $\approx$ hold + chunk.
+
+\paragraph{Decode after compress.}
+Greedy decode uses absolute \texttt{next\_position}$=T$. After any final compress we \textbf{recompute first-token logits} under the compressed cache (re-forward the last prompt token) so the first generated token is not scored from a stale full/hold cache.
 
 \paragraph{Public LongBench slice.}
-THUDM/LongBench: 20 items each of \texttt{multifieldqa\_en}, \texttt{qasper}, \texttt{hotpotqa} (60 total), contexts truncated to max 4096 tokens; token F1 vs gold + substring hit; greedy decode, max\_new$=$64.
+THUDM/LongBench: first 20 items each of \texttt{multifieldqa\_en}, \texttt{qasper}, \texttt{hotpotqa} (60 total); contexts truncated to max 4096 tokens (head+tail); token F1 vs gold + substring hit; greedy, max\_new$=$64; same items for all arms. Absolute full F1 is modest under 4B/greedy/truncate---we report \textbf{ratios to same-item full}.
+
+\paragraph{Suite-alignment risk.}
+Surface novelty is favored when secrets are surface-distinct against repetitive filler. We report prose/NL/adversarial stresses and public LongBench as honesty checks; LongBench is where novelty \emph{fails} to match full at peak$\sim$1k.
 
 \paragraph{Default API.}
 \texttt{prefill\_auto(\ldots, mode="stream", discovery="novelty")}.\\
@@ -150,12 +160,14 @@ Full KV scales with $L$; sticky novelty stream@512 stays $\sim$\textbf{1k} token
 Method & All-cell $B_{\min}$ & Tax vs mean $|\mathrm{oracle}|$ \\
 \midrule
 oracle\_r1 & $\sim$149 & $1.0\times$ \\
-seed\_valley & \textbf{192} & $\sim$\textbf{1.24}$\times$ global / $\sim$\textbf{1.16}$\times$ mean \\
+seed\_valley (multi-seed all-cell) & \textbf{192} & $\sim$\textbf{1.29}$\times$ / mean cell tax $\sim$\textbf{1.16}$\times$ \\
+SnapKV (single-needle mid, same scorer suite) & 192 & $\sim$1.24$\times$ vs oracle mid \\
+seed\_valley (single-needle mid) & \textbf{176} & $\sim$\textbf{1.14}$\times$ vs oracle mid \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Posthoc is near-oracle-tight; \textbf{stream is not}, until discovery improves.
+Posthoc is near-oracle-tight on the multi-seed suite; SnapKV is competitive but seed\_valley is slightly tighter at mid-depth single-needle (FINDINGS scorer budget). \textbf{Stream is not} near-oracle until discovery improves.
 
 \subsection{Stress and transfer (summary)}
 
@@ -185,7 +197,7 @@ Qwen2.5 / Llama-3.2 & H1 holds; family-specific posthoc floors \\
 \subsection{Public LongBench decomposition}
 \label{sec:longbench}
 
-Synthetic suite success does not automatically transfer to open long-document QA. On the fixed 60-item slice (same items for all arms), sticky novelty stream@512 is only slightly above attention streaming and far below full (Table~\ref{tab:lb-posthoc}). A posthoc query-aware upper bound---full prefill, then \texttt{seed\_valley} compress with the question in the observation window---recovers \textbf{0.95$\times$} full mean F1 at final $B{=}512$ and $\sim$\textbf{1.0$\times$} at 1024/2048. Peak remains full $L$ for posthoc; the point is diagnostic: \textbf{query-aware scoring can keep answer-bearing tokens} when allowed to see the full prefix and the question.
+Synthetic suite success does not automatically transfer to open long-document QA. On the fixed 60-item slice (same items for all arms), online novelty stream@512 is far below full ($\sim$0.64$\times$ F1 at peak $\sim$1k; Table~\ref{tab:lb-pareto}), and only slightly above attention streaming on an earlier same-slice run (FINDINGS: valley F1 0.18 vs novelty 0.19). A posthoc query-aware upper bound---full prefill, then \texttt{seed\_valley} compress with the question in the observation window---recovers \textbf{0.95$\times$} full mean F1 at final $B{=}512$ and $\sim$\textbf{1.0$\times$} at 1024/2048 (Table~\ref{tab:lb-posthoc}). Peak remains full $L$ for posthoc; the point is diagnostic: \textbf{query-aware scoring can keep answer-bearing tokens} when allowed to see the full prefix and the question.
 
 \begin{table}[t]
 \centering
@@ -264,7 +276,7 @@ Peak cache under novelty stays $\sim$1024 tokens at all three lengths.
   \item On this \textbf{controlled multi-seed retrieval suite}, critical$\pm R^*$ is necessary/sufficient for $\varepsilon\!\approx\!0$ single-fact recall.
   \item Stream failures at moderate budget are primarily a \textbf{query-unknown discovery} problem (oracle-online upper bound).
   \item Sticky surface novelty \textbf{closes most of that gap} through \textbf{40k} multi-seed at peak cache $\sim$1k on the primary model, with transfer smoke to other small instruct models including hybrid Gemma-4.
-  \item On public LongBench, \textbf{posthoc query-aware compression $\approx$ full} at final $B{=}512$ (peak=$L$), while online novelty lags; \textbf{query\_hold} recovers a measured Pareto (best $\sim$0.92$\times$ full F1 at peak $\sim$2.5k).
+  \item On a fixed public LongBench slice, \textbf{posthoc query-aware compression reaches 0.95$\times$ full F1} at final $B{=}512$ (peak=$L$), while online novelty lags ($\sim$0.64$\times$ at peak$\sim$1k); \textbf{query\_hold} recovers a measured Pareto (best $\sim$0.92$\times$ full F1 at peak $\sim$2.5k). Absolute full F1 is modest under 4B/greedy/4k truncate.
 \end{itemize}
 
 \subsection{What we do \emph{not} claim}
@@ -283,7 +295,7 @@ General long-context SOTA &
 All task types &
   Primary suite is retrieval / needle-class (+ multi-needle, hops, prose, multidoc stress). Full reasoning chains, code repos, and full LongBench/RULER leaderboards untested. \\
 Oracle-tight online budgets for free &
-  Sticky novelty $\approx$ oracle quality on this suite at@512, but multi-secret packing ($\sim$80\% multi3) and suite-alignment remain. \\
+  Sticky novelty multi3/hop is \textbf{5/5}@512 with adequate decode budget; multi-secret packing still stresses oracle\_pin@512 (multi3 \textbf{2/5}). Suite-alignment of surface novelty remains. \\
 Production memory stack &
   Fake-int8 is logical accounting only; no fused kernels or serving productization. \\
 Novelty as universal ``importance'' &
@@ -303,15 +315,18 @@ Peak VRAM $=$ final decode KV &
 \subsection{Threats to validity}
 
 \begin{itemize}[leftmargin=*,itemsep=2pt]
-  \item \textbf{Greedy decode} and chat templates may interact with exact-match scoring.
-  \item \textbf{Filler distribution} is synthetic; natural corpora may change novelty baselines.
+  \item \textbf{Greedy decode} and chat templates may interact with exact-match / token-F1 scoring; LongBench absolute full F1 is low ($\sim$0.28).
+  \item \textbf{Filler distribution} is synthetic; surface novelty is suite-aligned to distinct secrets in repetitive hay---LongBench is the external honesty check.
+  \item \textbf{Multidoc packing:} novelty@512 can beat labeled oracle\_pin@512 (15/15 vs 5/15), so keep-set definitions and packing under multi-span budgets remain open.
   \item \textbf{Hybrid models:} only full layers are compressed; sliding-window behavior is infrastructure-sensitive.
+  \item \textbf{Sample size:} multi-seed $N$ is lab-grade ($5\times3$ @4k; $3\times3$ long-$L$); ``9/9 through 40k'' is cells on this protocol, not a large meta-analysis.
   \item \textbf{Selection bias toward positive arms:} we iterated methods until discovery worked; negative results (scored capsules alone, non-sticky long-$L$) are reported but the path is research-in-the-loop.
+  \item \textbf{Community baselines:} stream tables emphasize valley / novelty / oracle / query\_hold; SnapKV is reported posthoc on the scorer-tax suite, not as a full multi-seed stream LongBench arm.
 \end{itemize}
 
 \section{Conclusion}
 
-Near-lossless training-free KV compression on retrieval tasks is structured by \textbf{critical local neighborhoods}. When the question is known, a simple attention valley scorer approximates the oracle keep set with small tax---and on a public LongBench slice, posthoc query-aware compression reaches $\sim$full quality at final $B{=}512$. When the question is \textbf{not} known---as in online streaming---the binding constraint is \textbf{discovery}/retention before the query. Sticky surface novelty is a lightweight query-unknown detector that, on our multi-seed suite, restores high success through \textbf{40k} context at a \textbf{flat $\sim$1k-token peak cache}. On open long-doc QA, quality becomes a \textbf{Pareto} in peak cache (query-hold $\sim$0.92$\times$ full F1 at $\sim$2.5k peak). Honest next steps are better mid-stream pins and multi-entity packing---not larger single-needle grids alone.
+Near-lossless training-free KV compression on retrieval tasks is structured by \textbf{critical local neighborhoods}. When the question is known, a simple attention valley scorer approximates the oracle keep set with small tax---and on a public LongBench slice, posthoc query-aware compression reaches \textbf{0.95$\times$} full F1 at final $B{=}512$ (peak=$L$). When the question is \textbf{not} known---as in online streaming---the binding constraint is \textbf{discovery}/retention before the query. Sticky surface novelty is a lightweight query-unknown detector that, on our multi-seed suite, restores high success through \textbf{40k} context at a \textbf{flat $\sim$1k-token peak cache} (9/9 cells on the long-$L$ protocol). On open long-doc QA, quality becomes a \textbf{Pareto} in peak cache (query-hold $\sim$0.92$\times$ full F1 at $\sim$2.5k peak). Honest next steps are better mid-stream pins, multi-entity packing, and head-to-head stream baselines against published keepers---not larger single-needle grids alone.
 
 \section*{Reproducibility}
 

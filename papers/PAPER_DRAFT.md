@@ -42,30 +42,38 @@ under **peak** cache / VRAM constraints—not only final decode size after a ful
 
 ## 2. Related work
 
-- **Training-free eviction / selection:** H2O (heavy hitters), StreamingLLM (attention sinks + recent), Scissorhands / TOVA, SnapKV and pyramid-style keepers (obs-window importance). These mainly address scoring when queries or observation windows exist.
-- **Streaming systems:** peak cache / VRAM under chunked prefill; hybrid sliding+full attention still leaves full-layer KV compressible.
-- **Quantization:** KIVI-style KV quant is complementary; we use fake-int8 only for logical byte accounting.
-- **Benchmarks:** needles / multi-hop synthetics vs LongBench-style public long-doc QA.
+- **Training-free eviction / selection:** H2O, StreamingLLM, Scissorhands / TOVA, SnapKV, pyramid keepers. Query-aware vs query-agnostic selection is active; our stream is query-unknown until the question arrives.
+- **Streaming systems:** peak cache / VRAM under chunked prefill; hybrid sliding+full still leaves full-layer KV compressible. InfLLM-class page caches are complementary infrastructure.
+- **Quantization:** KIVI-style KV quant is complementary; fake-int8 only for logical byte accounting.
+- **Benchmarks:** needles / multi-hop synthetics vs LongBench slice (not full RULER/InfiniteBench leaderboards).
 
-**Positioning.** Mechanism + discovery diagnosis + workstation \(L_\varepsilon\), not a new attention kernel or LongBench SOTA chase. Novelty is a **query-unknown discovery** layer on top of H1′ retention; query_hold makes open-QA quality a measured peak/quality curve.
+**Positioning.** Mechanism + discovery diagnosis + workstation \(L_\varepsilon\), not a new attention kernel or LongBench SOTA chase.
 
 ---
 
-## 3. Methods (short)
+## 3. Methods
 
-**Task.** Needle-in-haystack style secrets in seeded filler; depths \(\{0,0.5,1\}\); success = exact key recall (greedy decode).
+**Task.** Needle secrets in seeded filler; depths \(\{0,0.5,1\}\); exact-match greedy. Multi-seed \(5\times3\) @4k; \(3\times3\) long-\(L\).
 
-**H1′ keep set.** sinks ∪ critical±\(R\) ∪ recent/question window. Kill arms: full, oracle_r1, anti_oracle.
+**H1′ keep set.** \(K^\star =\) sinks ∪ critical±\(R\) ∪ recent/question. Kill arms: full, oracle_r1, anti_oracle. \(R^*=1\).
 
-**Posthoc scorer.** `seed_valley`: shared obs-window attention → seeds → contiguous valley + ±R.
+**Posthoc `seed_valley`.** Full prefill → obs-window (\(W{=}128\)) attention votes → seeds/valleys ±R → pack to \(B\); force sinks + last \(W\). LongBench posthoc UB: peak \(=L\).
 
-**Streaming.** Chunked prefill; compress when cache > budget; peak ≈ budget + chunk.
+**Streaming.** Chunk 512; compress when over budget; peak ≈ budget + chunk; absolute RoPE at decode.
 
-**Oracle-online upper bound.** Force-keep critical±R whenever still in cache (perfect discovery).
+**Oracle-online.** Force-keep critical±R at stream peak class.
 
-**Surface novelty (query-unknown).** Per-token score from within-prefix rarity, first occurrence, and surface cues (digits, ID-like pieces). Expand peaks ±R into pin sets. **Sticky** registry: once discovered, pins stay until evicted; packing ranks pins by score under budget (sinks + recent reserved).
+**Surface novelty.** Prefix rarity + digit/ID cues → peaks ±R → **sticky** pin registry + score packing.
 
-**Default API.** `prefill_auto(..., mode="stream", discovery="novelty")`.
+**Query-hold.** Hold larger mid-stream hybrid pins; query-aware tighten to final budget.
+
+**Decode after compress.** Recompute first-token logits under compressed cache (re-forward last prompt token).
+
+**LongBench slice.** 20× multifieldqa_en/qasper/hotpotqa @ max_ctx 4096; token F1 + substr hit; report ratios to same-item full.
+
+**Suite risk.** Novelty favors surface-distinct secrets; LongBench is the honesty check.
+
+**Default API.** `prefill_auto(..., discovery="novelty")` or `"query_hold"`.
 
 ---
 
@@ -88,7 +96,9 @@ under **peak** cache / VRAM constraints—not only final decode size after a ful
 | Method | All-cell \(B_{\min}\) | Tax vs mean \|oracle\| |
 |--------|----------------------|-------------------------|
 | oracle_r1 | ~149 | 1.0× |
-| seed_valley | **192** | ~**1.24×** global / ~**1.16×** mean |
+| seed_valley (multi-seed all-cell) | **192** | ~**1.29×** / mean cell tax ~**1.16×** |
+| SnapKV (single-needle mid) | 192 | ~1.24× vs oracle mid |
+| seed_valley (single-needle mid) | **176** | ~**1.14×** |
 
 Posthoc is near-oracle-tight; **stream is not**, until discovery improves.
 
@@ -164,28 +174,30 @@ Peak cache tokens stay **~1024** under novelty stream@512 at all three lengths. 
 - On this **controlled multi-seed retrieval suite**, critical±\(R^*\) is necessary/sufficient for ε≈0 single-fact recall.  
 - Stream failures at moderate budget are primarily a **query-unknown discovery** problem (oracle-online upper bound).  
 - Sticky surface novelty **closes most of that gap** through **40k** multi-seed at peak cache ~1k on the primary model, with transfer smoke to other small instruct models including hybrid Gemma-4.  
-- On public LongBench, **posthoc query-aware ≈ full** at final B=512 (peak=\(L\)); online quality is a **Pareto** in peak cache (query_hold best ≈ **0.92×** full F1 @ ~2.5k).  
+- On a fixed LongBench slice, **posthoc reaches 0.95× full F1** at final B=512 (peak=\(L\)); online is a **Pareto** (query_hold best ≈ **0.92×** @ ~2.5k). Absolute full F1 is modest under 4B/greedy/4k truncate.
 
 ### 6.2 What we do **not** claim
 
 | Not claimed | Why |
 |-------------|-----|
-| **General long-context SOTA** | Public LongBench slice (60 items) shows novelty only slightly above valley and **well below full** (mean F1 0.19 vs 0.28). Strong on needle/retrieval suites; not a free lunch on open long-doc QA. |
-| **All task types** | Suite is retrieval / needle-class (plus limited multi-needle and NL fact variants). Reasoning chains, code repos, and multi-doc QA are largely untested. |
-| **Oracle-tight online budgets for free** | Sticky novelty matches multi3/hop quality at@512 on this suite when decode budget is adequate; multi-secret packing still stresses oracle_pin@512 (2/5). Suite-alignment of surface novelty remains. |
-| **Production memory stack** | Fake-int8 is logical accounting only; no fused CUDA kernels, paged attention productization, or serving integration. |
-| **Novelty as universal “importance”** | Detector exploits **surface distinctness** vs repetitive filler. Secrets that look like filler, or filler that looks like IDs, can still confuse discovery (adv suite is only a partial stress). |
-| **Large models / long training-free SOTA** | Primary evidence is **~3–4B** instruct models on one GPU class. |
-| **Statistical finality** | Multi-seed \(N\) is modest (5×3 @4k; 3×3 long-\(L\)). Results are **lab-grade**, not a large multi-run meta-analysis. |
-| **ε=0 beyond measured envelope** | Sticky multi-seed is measured through **40k**; longer \(L\) is extrapolation until re-run. |
-| **Peak VRAM = final decode KV** | Streaming caps **peak cache tokens**; activation/workspace memory and model weights still dominate total VRAM. |
+| **General long-context SOTA** | Public LongBench slice (60 items) shows novelty well below full online (~0.18 vs 0.28 F1). Strong on needle/retrieval suites; not free lunch on open long-doc QA. |
+| **All task types** | Primary suite is retrieval / needle-class (+ multi-needle, hops, prose, multidoc stress). Full reasoning chains, code repos, and full LongBench/RULER leaderboards untested. |
+| **Oracle-tight online budgets for free** | Sticky multi3/hop is 5/5@512 with adequate decode; multi-secret packing still stresses oracle_pin@512 (2/5). Suite-alignment remains. |
+| **Production memory stack** | Fake-int8 is logical accounting only; no fused CUDA kernels or serving productization. |
+| **Novelty as universal “importance”** | Detector exploits surface distinctness vs repetitive filler. |
+| **Large models / long training-free SOTA** | Primary evidence is ~3–4B instruct models on one GPU class. |
+| **Statistical finality** | Multi-seed \(N\) modest (5×3 @4k; 3×3 long-\(L\)). Lab-grade. |
+| **ε=0 beyond measured envelope** | Sticky multi-seed through **40k** (9/9 cells); longer \(L\) is extrapolation. |
+| **Peak VRAM = final decode KV** | Streaming caps peak cache tokens; weights/activations dominate total VRAM. |
 
 ### 6.3 Threats to validity
 
-- **Greedy decode** and chat templates may interact with exact-match scoring.  
-- **Filler distribution** is synthetic; natural corpora may change novelty baselines.  
-- **Hybrid models:** only full layers are compressed; sliding-window behavior is infrastructure-sensitive.  
-- **Selection bias toward positive arms:** we iterated methods until discovery worked; negative results (scored capsules alone, non-sticky long-\(L\)) are reported but the path is research-in-the-loop.
+- **Greedy decode** / chat templates vs exact-match and token F1; LongBench absolute full F1 ~0.28.  
+- **Suite alignment:** surface novelty vs repetitive filler; LongBench is the honesty check.  
+- **Multidoc packing:** novelty can beat labeled oracle_pin@512 (15/15 vs 5/15).  
+- **Hybrid models:** only full layers compressed.  
+- **Sample size** lab-grade; selection bias toward positive arms admitted.  
+- **Community baselines:** SnapKV in posthoc scorer-tax; not full multi-seed stream LongBench arm.
 
 ---
 
