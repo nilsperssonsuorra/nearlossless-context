@@ -6,7 +6,7 @@
 
 ## Ready-to-paste blurb (LinkedIn / email / intro)
 
-I ran a private research lab on near-lossless long-context inference under fixed VRAM (RTX 3090 24 GB, Qwen3-4B). Multi-seed kill tests showed that near–full-KV retrieval needs critical fact tokens plus a small local radius—not bare spans and not the whole haystack (15/15 oracle, 0/15 anti-oracle). Online streaming failed under hay variation at moderate budgets not because peak cache was too small, but because query-unknown discovery is weak: attention-based stream@512 was only ~33% multi-seed while perfect online pin of the critical neighborhood was 15/15 at the same peak. I built a training-free surface-novelty detector with sticky pin packing that closes most of that gap—multi-seed success through 40k tokens at ~1k peak cache, multi-hop and multi-document stresses, and an external-style mixed QA slice where novelty matched full-context hit rate (10/10) while attention streaming scored 0/10. Peak decode KV stayed ~72 MB and peak VRAM ~8.3 GB flat from 4k to 40k. Writeup, figure, and limitations are in the repo paper draft; this is a workstation mechanism/systems study, not a general long-context leaderboard claim.
+I ran a research lab on near-lossless long-context inference under fixed VRAM (RTX 3090 24 GB, Qwen3-4B). Multi-seed kill tests showed that near–full-KV retrieval needs critical fact tokens plus a small local radius—not bare spans and not the whole haystack (15/15 oracle, 0/15 anti-oracle). Online streaming failed under hay variation at moderate budgets not because peak cache was too small, but because query-unknown discovery is weak: attention-based stream@512 was only ~33% multi-seed while perfect online pin of the critical neighborhood was 15/15 at the same peak. I built a training-free surface-novelty detector with sticky pin packing that closes most of that gap—multi-seed success through 40k tokens at ~1k peak cache, multi-hop and multi-document stresses, and an external-style mixed QA slice where novelty matched full-context hit rate (10/10) while attention streaming scored 0/10. Peak decode KV stayed ~72 MB and peak VRAM ~8.3 GB flat from 4k to 40k. Writeup, figure, and limitations are in the repo paper draft; this is a workstation mechanism/systems study, not a general long-context leaderboard claim.
 
 *(~130 words — paste as-is or trim the last sentence for shorter posts.)*
 
@@ -31,6 +31,7 @@ I studied near-lossless KV compression on a 24 GB GPU and showed that stream f
 | [`papers/figures/fig1_story.png`](papers/figures/fig1_story.png) | H1 kill → discovery gap → long-L / peak cache |
 | [`results/FINDINGS.md`](results/FINDINGS.md) | Full measured tables |
 | [`README.md`](README.md) | Headline results + how to run |
+| Repo | [github.com/nilsperssonsuorra/nearlossless-context](https://github.com/nilsperssonsuorra/nearlossless-context) · tag `v0.1-arxiv` |
 
 ## Claims (supported)
 
@@ -51,4 +52,4 @@ from compress_adaptive import prefill_auto
 past, logits, info = prefill_auto(model, input_ids, mode="stream", discovery="novelty")
 ```
 
-Lab: RTX 3090 24 GB · primary `Qwen/Qwen3-4B-Instruct-2507` · private repo `nearlossless-context`.
+Lab: RTX 3090 24 GB · primary `Qwen/Qwen3-4B-Instruct-2507` · [nearlossless-context](https://github.com/nilsperssonsuorra/nearlossless-context) (`v0.1-arxiv`).
