@@ -6,6 +6,7 @@ __pycache__/
 results/*.csv
 results/*.json
 !results/.gitkeep
+!results/paper_aggregates.csv
 *.pt
 *.bin
 *.safetensors

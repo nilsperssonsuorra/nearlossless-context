@@ -1,4 +1,4 @@
-# Near-Lossless Long Context under Fixed VRAM via Critical-Span Retention
+# Critical-Span Retention and Query-Unknown Discovery for Long-Context KV Compression
 
 **Status:** workshop / arXiv-style draft  
 **Lab:** RTX 3090 24 GB · primary `Qwen/Qwen3-4B-Instruct-2507`  
@@ -7,18 +7,18 @@
 
 > Primary multi-seed tables: `results/paper_rigor_*`, `novelty_*`, `FINDINGS.md`.  
 > **Figure:** [`figures/fig1_story.png`](figures/fig1_story.png) (regenerate: `python experiments/plot_paper_figures.py`).  
-> **Readable PDF:** [`main.pdf`](main.pdf) — build with `powershell -File papers/build_pdf.ps1` (LaTeX source: `main.tex`).
+> **Readable PDF:** [`main.pdf`](main.pdf). Build it with `powershell -File papers/build_pdf.ps1` (LaTeX source: `main.tex`).
 
 ---
 
 ## Abstract
 
-Long-context inference is limited by KV-cache memory. Training-free eviction methods shrink the cache, but it is often unclear *which* tokens are necessary for near–full-KV quality, and whether online streaming fails from insufficient peak budget or from weak **query-unknown discovery**. On a multi-seed controlled retrieval suite (Qwen3-4B, RTX 3090), we show:
+Long-context inference is limited by KV-cache memory. Training-free eviction methods shrink the cache, but it is often unclear *which* tokens a task requires and whether online streaming fails from insufficient peak budget or weak **query-unknown discovery**. We study these questions on a controlled retrieval suite using Qwen3-4B on an RTX 3090, then test the mechanism on a fixed public LongBench slice.
 
-1. **Structure (H1′).** Retaining critical fact tokens plus a small local radius \(R^*=1\) (with attention sinks and a recent/question window) is **necessary and sufficient** for ε≈0 single-fact recall: oracle **15/15**, anti-oracle **0/15**, full KV **15/15** (5 seeds × 3 depths @4k).
+1. **Structure (H1′).** Within the measured 15-case protocol, retaining critical fact tokens plus radius \(R^*=1\) is empirically **necessary and sufficient** for exact single-fact recall: oracle **15/15**, anti-oracle **0/15**, and full KV **15/15**.
 2. **Discovery gap.** Online streaming at moderate peak fails under multi-seed hay not because the budget is too small, but because discovery is weak: attention stream@512 is **33%**, while perfect online pin of critical±R is **15/15** at the same peak.
-3. **Closing the gap (suite).** A **surface novelty detector** (within-prefix rarity + digit/ID-like cues; no final question) with **sticky pin packing** reaches **~93%** multi-seed @4k and **100%** (3×3) through **40k** at stream@512—peak cache **~1k tokens**, flat in \(L\).
-4. **Public long-doc QA (decomposition).** On a 60-item LongBench slice, sticky novelty lags full (~0.64× F1 at peak ~1k). A **posthoc query-aware upper bound** recovers **0.95–1.0×** full F1 at final \(B\in\{512,1024\}\). **Query-hold** streaming trades peak for quality, best ≈**0.92×** full F1 at peak ~2.5k.
+3. **Closing the gap (suite).** A **surface novelty detector** reaches **14/15** @4k. With sticky pin packing, it reaches **9/9** at each measured length from 16k through **40k**, with measured peak cache **~1k tokens**.
+4. **Public long-doc QA (decomposition).** On a fixed 60-item LongBench slice, sticky novelty reaches 0.64× full mean F1 at peak ~1k. Posthoc query-aware compression reaches 0.95× at final 512 and ~1.01× at 1024, but requires peak \(L\). Query-hold's best measured point reaches 0.92× at peak ~2.5k.
 
 The critical-span mechanism transfers across Qwen2.5, Llama-3.2, and hybrid Gemma-4 (full layers). We do **not** claim general long-context SOTA; see §Limitations.
 
@@ -34,7 +34,7 @@ We study **near-lossless** compression on retrieval-critical prompts: quality \(
 L_\varepsilon \;=\; \max\{\, L : Q(M,L) \ge (1-\varepsilon)\,Q(\mathrm{Full},L) \,\}
 \]
 
-under **peak** cache / VRAM constraints—not only final decode size after a full prefill.
+under **peak** cache / VRAM constraints, not only final decode size after a full prefill.
 
 **Claim.** Near-lossless training-free KV compression is better understood as **retaining critical local neighborhoods** and **discovering them online before the question exists** than as uniform thinning or posthoc score ranking alone. On open long-document QA, the residual gap is largely an **online retention / peak-cache Pareto**, not a failure of query-aware scoring once the question is available.
 
@@ -79,7 +79,7 @@ under **peak** cache / VRAM constraints—not only final decode size after a ful
 
 ## 4. Results
 
-### Figure 1 — Story in four panels
+### Figure 1: Story in four panels
 
 ![Figure 1: H1 kill, discovery gap, long-L success, peak cache](figures/fig1_story.png)
 
@@ -87,9 +87,9 @@ under **peak** cache / VRAM constraints—not only final decode size after a ful
 
 **B. Discovery gap (stream@512, same multi-seed protocol).** Attention valley **33%**; surface novelty **93%** (14/15); oracle pin **100%**. Peak budget is in the same class (~1k with chunk). Failures of valley at 512 are **detector** failures, not “stream cannot work.”
 
-**C. Long \(L\) multi-seed (3×3).** Sticky novelty@512 is **9/9** at 16k, 24k, 32k, and **40k**. Non-sticky novelty degraded at 24k (~6/9) via re-rank thrash; sticky packing fixed it. Valley@512 remains end-depth-only (~33%) under multi-seed hay as \(L\) grows.
+**C. Long \(L\) multi-seed (3×3).** Sticky novelty@512 is **9/9** at 16k, 24k, 32k, and **40k**. Valley@512 was measured at 8k, 12k, and 16k, where it reached 3/9; it was not run at longer lengths.
 
-**D. Peak cache.** Full KV scales with \(L\); sticky novelty stream@512 stays **~1k** tokens. Prior valley operating points often used **~1.5–2k** peak for long \(L\).
+**D. Peak cache.** Full KV scales with \(L\); sticky novelty stream@512 stays **~1k** tokens at the three measured resource points. Prior valley operating points often used **~1.5 to 2k** peak for long \(L\).
 
 ### Scorer tax (posthoc, question known)
 
@@ -115,13 +115,13 @@ Posthoc is near-oracle-tight; **stream is not**, until discovery improves.
 | Prose soft fact (no digits) @512 | novelty **15/15**; valley **53%** |
 | Multidoc (6 titled docs) @512 | novelty **15/15**; valley/oracle_pin **5/15** |
 | External-style mixed QA (10 items, ~4k padded) | novelty **10/10** hits (= full); valley **0/10** |
-| **Public LongBench** (60: multifieldqa_en+qasper+hotpotqa @4k) | full F1 **0.28** / hit 23–25%; novelty **0.18–0.19** / 10%; valley **0.18** / 8%; hybrid **0.19** / **12%** |
-| **Posthoc query-aware UB** (same 60; full prefill→seed_valley) | posthoc@512 **0.95×** full F1; @1024/2048 **~1.0×** (peak=\(L\)) — discovery *can* match full |
+| **Public LongBench** (60: multifieldqa_en+qasper+hotpotqa @4k) | full F1 **0.28** / hit 23 to 25%; novelty **0.18 to 0.19** / 10%; valley **0.18** / 8%; hybrid **0.19** / **12%** |
+| **Posthoc query-aware UB** (same 60; full prefill→seed_valley) | posthoc@512 **0.95×** full F1; @1024/2048 **~1.0×** (peak=\(L\)), showing that discovery *can* match full |
 | **query_hold Pareto** (hold×final) | best **h2048→f1024 ≈ 0.92×** full F1 @ peak ~2.5k; novelty@512 **0.64×** @ peak 1k |
 | Gemma-4 E4B hybrid novelty@512 | multi-seed **9/9** @4k (valley needs ~1024) |
 | Qwen2.5 / Llama-3.2 | H1 holds; family-specific posthoc floors |
 
-### LongBench decomposition (paper priorities 1–2)
+### LongBench decomposition (paper priorities 1 and 2)
 
 Same 60 items, max_ctx=4096, Qwen3-4B greedy (`external_slice_20260717T222040Z`, `…T225301Z`).
 
@@ -171,7 +171,7 @@ Peak cache tokens stay **~1024** under novelty stream@512 at all three lengths. 
 
 ### 6.1 What we claim
 
-- On this **controlled multi-seed retrieval suite**, critical±\(R^*\) is necessary/sufficient for ε≈0 single-fact recall.  
+- In the **15 measured cells** of the controlled 4k protocol, critical±\(R^*\) is empirically necessary and sufficient for exact single-fact recall.
 - Stream failures at moderate budget are primarily a **query-unknown discovery** problem (oracle-online upper bound).  
 - Sticky surface novelty **closes most of that gap** through **40k** multi-seed at peak cache ~1k on the primary model, with transfer smoke to other small instruct models including hybrid Gemma-4.  
 - On a fixed LongBench slice, **posthoc reaches 0.95× full F1** at final B=512 (peak=\(L\)); online is a **Pareto** (query_hold best ≈ **0.92×** @ ~2.5k). Absolute full F1 is modest under 4B/greedy/4k truncate.
@@ -185,7 +185,7 @@ Peak cache tokens stay **~1024** under novelty stream@512 at all three lengths. 
 | **Oracle-tight online budgets for free** | Sticky multi3/hop is 5/5@512 with adequate decode; multi-secret packing still stresses oracle_pin@512 (2/5). Suite-alignment remains. |
 | **Production memory stack** | Fake-int8 is logical accounting only; no fused CUDA kernels or serving productization. |
 | **Novelty as universal “importance”** | Detector exploits surface distinctness vs repetitive filler. |
-| **Large models / long training-free SOTA** | Primary evidence is ~3–4B instruct models on one GPU class. |
+| **Large models / long training-free SOTA** | Primary evidence is ~3 to 4B instruct models on one GPU class. |
 | **Statistical finality** | Multi-seed \(N\) modest (5×3 @4k; 3×3 long-\(L\)). Lab-grade. |
 | **ε=0 beyond measured envelope** | Sticky multi-seed through **40k** (9/9 cells); longer \(L\) is extrapolation. |
 | **Peak VRAM = final decode KV** | Streaming caps peak cache tokens; weights/activations dominate total VRAM. |
@@ -203,7 +203,7 @@ Peak cache tokens stay **~1024** under novelty stream@512 at all three lengths. 
 
 ## 7. Conclusion
 
-Near-lossless training-free KV compression on retrieval tasks is structured by **critical local neighborhoods**. When the question is known, a simple attention valley scorer approximates the oracle keep set with small tax. When the question is **not** known—as in online streaming—the binding constraint is **discovery**. Sticky surface novelty is a lightweight query-unknown detector that, on our multi-seed suite, restores high success through **40k** context at a **flat ~1k-token peak cache**, transferring to hybrid Gemma-4 at primary-class budgets. The honest next steps are broader tasks and multi-entity packing—not larger single-needle grids alone.
+The controlled experiments support a useful decomposition: retain a task-critical local neighborhood, then discover it before irreversible eviction. Sticky novelty reaches 9/9 at each measured length from 16k through 40k with a ~1k-token peak cache, but the LongBench slice reaches only 0.64× full mean F1 at that peak. The evidence supports a protocol-specific mechanism and an online peak-quality tradeoff, not general near-lossless compression.
 
 ---
 

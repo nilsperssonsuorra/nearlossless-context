@@ -1,26 +1,34 @@
-"""
-Generate portfolio/paper figures from measured multi-seed results (hardcoded
-from FINDINGS.md tables so plots do not depend on large JSON re-parsing).
-
-Usage:
-  python experiments/plot_paper_figures.py
-  → papers/figures/fig1_story.png (+ .pdf)
-"""
+"""Generate Figure 1 from checked-in machine-readable paper aggregates."""
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mtick
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "papers" / "figures"
+AGGREGATES = ROOT / "results" / "paper_aggregates.csv"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _style():
+def _rows(group: str) -> list[dict[str, str]]:
+    with AGGREGATES.open(encoding="utf-8", newline="") as handle:
+        return [r for r in csv.DictReader(handle) if r["claim_group"] == group]
+
+
+def _rate(group: str, arm: str, context: int) -> float:
+    row = next(
+        r
+        for r in _rows(group)
+        if r["arm"] == arm and int(r["context_tokens"]) == context
+    )
+    return 100.0 * float(row["success_rate"])
+
+
+def _style() -> None:
     plt.rcParams.update(
         {
             "font.size": 10,
@@ -35,30 +43,42 @@ def _style():
     )
 
 
-def panel_h1(ax):
-    """Kill-test rates @4k multi-seed 5×3."""
-    labels = ["Full KV", "Oracle\ncrit±1", "Anti-oracle\n(no fact)"]
-    rates = [100.0, 100.0, 0.0]
-    colors = ["#2a9d8f", "#264653", "#e76f51"]
-    bars = ax.bar(labels, rates, color=colors, width=0.65, edgecolor="none")
-    ax.set_ylim(0, 115)
-    ax.set_ylabel("Success rate (%)")
-    ax.set_title("A. H1′ kill test (4k, 5×3 multi-seed)")
-    for b, r in zip(bars, rates):
+def _bar_labels(ax, bars, rates) -> None:
+    for bar, rate in zip(bars, rates):
         ax.text(
-            b.get_x() + b.get_width() / 2,
-            r + 3,
-            f"{int(r)}%",
+            bar.get_x() + bar.get_width() / 2,
+            rate + 3,
+            f"{rate:.0f}%",
             ha="center",
             va="bottom",
             fontsize=9,
             fontweight="bold",
         )
+
+
+def panel_h1(ax) -> None:
+    labels = ["Full KV", "Oracle\ncrit ±1", "Anti-oracle\n(no fact)"]
+    rates = [
+        _rate("h1", "full", 4096),
+        _rate("h1", "oracle_r1", 4096),
+        _rate("h1", "anti_oracle", 4096),
+    ]
+    bars = ax.bar(
+        labels,
+        rates,
+        color=["#2a9d8f", "#264653", "#e76f51"],
+        width=0.65,
+        edgecolor="none",
+    )
+    ax.set_ylim(0, 115)
+    ax.set_ylabel("Success rate (%)")
+    ax.set_title("A. Kill test (4k, 5x3 multi-seed)")
+    _bar_labels(ax, bars, rates)
     ax.axhline(100, color="#ccc", lw=0.8, ls="--", zorder=0)
     ax.text(
         0.98,
         0.12,
-        "Necessity + sufficiency\nof critical ± radius",
+        "Necessary and sufficient\nwithin this protocol",
         transform=ax.transAxes,
         va="bottom",
         ha="right",
@@ -67,48 +87,54 @@ def panel_h1(ax):
     )
 
 
-def panel_discovery(ax):
-    """Discovery gap @ stream@512 multi-seed 5×3."""
-    labels = [
-        "Valley\n(attn)",
-        "Novelty\n(surface)",
-        "Oracle pin\n(perfect)",
+def panel_discovery(ax) -> None:
+    labels = ["Valley\n(attn)", "Novelty\n(surface)", "Oracle pin\n(perfect)"]
+    rates = [
+        _rate("discovery", "stream_valley", 4096),
+        _rate("discovery", "stream_novelty", 4096),
+        _rate("h1", "oracle_r1", 4096),
     ]
-    rates = [33.0, 93.0, 100.0]
-    colors = ["#e9c46a", "#2a9d8f", "#264653"]
-    bars = ax.bar(labels, rates, color=colors, width=0.65, edgecolor="none")
+    bars = ax.bar(
+        labels,
+        rates,
+        color=["#e9c46a", "#2a9d8f", "#264653"],
+        width=0.65,
+        edgecolor="none",
+    )
     ax.set_ylim(0, 115)
     ax.set_ylabel("Success rate (%)")
-    ax.set_title("B. Discovery gap (stream@512, 4k multi-seed)")
-    for b, r in zip(bars, rates):
-        ax.text(
-            b.get_x() + b.get_width() / 2,
-            r + 3,
-            f"{int(r)}%",
-            ha="center",
-            va="bottom",
-            fontsize=9,
-            fontweight="bold",
-        )
+    ax.set_title("B. Discovery gap (stream@512, 4k)")
+    _bar_labels(ax, bars, rates)
     ax.annotate(
-        "same peak budget ≈1k tokens",
-        xy=(1.0, 93),
-        xytext=(0.55, 55),
-        fontsize=8,
-        color="#333",
-        arrowprops=dict(arrowstyle="->", color="#666", lw=0.9),
+        "Same peak cache: ~1k tokens",
+        xy=(1.0, rates[1]),
+        xytext=(0.42, 59),
+        fontsize=9.5,
+        fontweight="bold",
+        color="#1f2933",
+        ha="left",
+        va="center",
+        bbox=dict(boxstyle="round,pad=0.32", fc="white", ec="#4b5563", lw=0.8),
+        arrowprops=dict(arrowstyle="->", color="#4b5563", lw=1.2),
     )
 
 
-def panel_l_curve(ax):
-    """Sticky novelty success vs L; valley@512 stays end-only ~33%."""
-    # Multi-seed 3×3 sticky novelty; valley from 8k multi-seed + pattern
-    L = np.array([4, 8, 16, 24, 32, 40], dtype=float)  # k tokens
-    # 4k: novelty 14/15≈93 sticky later 100 on stress code; use 93 multi-seed 5×3
-    novelty = np.array([93.0, 100.0, 100.0, 100.0, 100.0, 100.0])
-    valley = np.array([33.0, 33.0, 33.0, 33.0, 33.0, 33.0])  # multi-seed end-only class
+def panel_l_curve(ax) -> None:
+    rows = _rows("long_context")
+    novelty_rows = sorted(
+        (r for r in rows if r["arm"] == "stream_novelty"),
+        key=lambda r: int(r["context_tokens"]),
+    )
+    valley_rows = sorted(
+        (r for r in rows if r["arm"] == "stream_valley"),
+        key=lambda r: int(r["context_tokens"]),
+    )
+    novelty_l = np.array([int(r["context_tokens"]) / 1024 for r in novelty_rows])
+    novelty = np.array([100 * float(r["success_rate"]) for r in novelty_rows])
+    valley_l = np.array([int(r["context_tokens"]) / 1024 for r in valley_rows])
+    valley = np.array([100 * float(r["success_rate"]) for r in valley_rows])
     ax.plot(
-        L,
+        novelty_l,
         novelty,
         "o-",
         color="#2a9d8f",
@@ -117,48 +143,42 @@ def panel_l_curve(ax):
         label="Sticky novelty @512",
     )
     ax.plot(
-        L,
+        valley_l,
         valley,
         "s--",
         color="#e9c46a",
         lw=1.8,
         ms=6,
-        label="Attn valley @512",
+        label="Attn valley @512 (measured)",
     )
     ax.set_xlabel("Context length L (k tokens)")
     ax.set_ylabel("Multi-seed success (%)")
     ax.set_ylim(0, 110)
     ax.set_xlim(0, 44)
-    ax.set_title("C. Long-L multi-seed success (stream@512)")
+    ax.set_title("C. Long-context measured cells (stream@512)")
     ax.legend(loc="center right", frameon=False)
-    ax.annotate(
-        "sticky fix:\n24k 6/9→9/9",
-        xy=(24, 100),
-        xytext=(18, 70),
-        fontsize=8,
-        arrowprops=dict(arrowstyle="->", color="#666", lw=0.9),
-    )
 
 
-def panel_peak_cache(ax):
-    """Peak cache tokens: full L vs stream@512 vs stream@1536."""
-    L = np.array([4, 8, 16, 24, 32, 40], dtype=float)
-    full = L * 1000  # approx tokens
-    stream512 = np.full_like(L, 1024.0)  # budget + chunk
-    stream1536 = np.full_like(L, 2048.0)
-    ax.plot(L, full / 1000, "o-", color="#e76f51", lw=2, ms=6, label="Full KV (=L)")
-    ax.plot(
-        L,
-        stream1536 / 1000,
-        "s--",
-        color="#e9c46a",
-        lw=1.8,
-        ms=6,
-        label="Stream valley-class @1536",
+def panel_peak_cache(ax) -> None:
+    rows = _rows("systems")
+    full_rows = sorted(
+        (r for r in rows if r["arm"] == "full"),
+        key=lambda r: int(r["context_tokens"]),
     )
+    novelty_rows = sorted(
+        (r for r in rows if r["arm"] == "stream_novelty"),
+        key=lambda r: int(r["context_tokens"]),
+    )
+    full_l = np.array([int(r["context_tokens"]) / 1024 for r in full_rows])
+    full_peak = np.array([float(r["mean_peak_cache"]) / 1024 for r in full_rows])
+    novelty_l = np.array([int(r["context_tokens"]) / 1024 for r in novelty_rows])
+    novelty_peak = np.array(
+        [float(r["mean_peak_cache"]) / 1024 for r in novelty_rows]
+    )
+    ax.plot(full_l, full_peak, "o-", color="#e76f51", lw=2, ms=6, label="Full KV")
     ax.plot(
-        L,
-        stream512 / 1000,
+        novelty_l,
+        novelty_peak,
         "D-",
         color="#2a9d8f",
         lw=2,
@@ -167,7 +187,7 @@ def panel_peak_cache(ax):
     )
     ax.set_xlabel("Context length L (k tokens)")
     ax.set_ylabel("Peak cache (k tokens)")
-    ax.set_title("D. Peak cache stays flat under streaming")
+    ax.set_title("D. Measured peak cache")
     ax.set_xlim(0, 44)
     ax.set_ylim(0, 45)
     ax.legend(loc="upper left", frameon=False)
@@ -184,7 +204,7 @@ def panel_peak_cache(ax):
     )
 
 
-def main():
+def main() -> None:
     _style()
     fig, axes = plt.subplots(2, 2, figsize=(9.2, 6.8))
     panel_h1(axes[0, 0])
@@ -192,7 +212,7 @@ def main():
     panel_l_curve(axes[1, 0])
     panel_peak_cache(axes[1, 1])
     fig.suptitle(
-        "Near-lossless KV: critical spans → discovery gap → sticky novelty",
+        "Critical spans, the discovery gap, and sticky novelty",
         fontsize=12,
         fontweight="bold",
         y=0.995,
