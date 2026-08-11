@@ -1,5 +1,8 @@
 # nearlossless-context
 
+[![Paper DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21894255.svg)](https://doi.org/10.5281/zenodo.21894255)
+[![Software DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21894719.svg)](https://doi.org/10.5281/zenodo.21894719)
+
 **Near-lossless long-context inference under fixed VRAM** — critical-span retention, query-unknown discovery, and a measured peak/quality Pareto.
 
 Research code and experiments accompanying the preprint. This is an experimental prototype, not a production library.
@@ -7,6 +10,7 @@ Research code and experiments accompanying the preprint. This is an experimental
 | | |
 |--|--|
 | **Paper** | [`papers/main.pdf`](papers/main.pdf) · [doi:10.5281/zenodo.21894255](https://doi.org/10.5281/zenodo.21894255) |
+| **Software release** | [`v0.1.0`](https://github.com/nilsperssonsuorra/nearlossless-context/releases/tag/v0.1.0) · [doi:10.5281/zenodo.21894720](https://doi.org/10.5281/zenodo.21894720) |
 | **Figure** | [`papers/figures/fig1_story.png`](papers/figures/fig1_story.png) |
 | **Findings** | [`results/FINDINGS.md`](results/FINDINGS.md) |
 | **Usage** | [`USAGE.md`](USAGE.md) |
