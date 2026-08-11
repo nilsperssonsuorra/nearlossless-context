@@ -2,11 +2,11 @@
 
 **Near-lossless long-context inference under fixed VRAM** — critical-span retention, query-unknown discovery, and a measured peak/quality Pareto.
 
-Research code and experiments accompanying the paper draft. This is an experimental prototype, not a production library.
+Research code and experiments accompanying the preprint. This is an experimental prototype, not a production library.
 
 | | |
 |--|--|
-| **Paper** | [`papers/main.pdf`](papers/main.pdf) |
+| **Paper** | [`papers/main.pdf`](papers/main.pdf) · [doi:10.5281/zenodo.21894255](https://doi.org/10.5281/zenodo.21894255) |
 | **Figure** | [`papers/figures/fig1_story.png`](papers/figures/fig1_story.png) |
 | **Findings** | [`results/FINDINGS.md`](results/FINDINGS.md) |
 | **Usage** | [`USAGE.md`](USAGE.md) |
@@ -144,8 +144,8 @@ Core arc is **measured and written up**: mechanism → discovery gap → sticky 
 
 | File | Content |
 |------|---------|
-| **`papers/main.pdf`** | **Readable paper draft (start here)** |
-| `papers/PAPER_DRAFT.md` | Markdown twin of the draft |
+| **`papers/main.pdf`** | **Readable preprint (start here)** |
+| `papers/PAPER_DRAFT.md` | Markdown twin of the preprint |
 | `papers/figures/fig1_story.png` | H1 / discovery / long-\(L\) / peak-cache figure |
 | `USAGE.md` | `prefill_auto` + length guide |
 | `results/FINDINGS.md` | Full experimental tables / verdicts |
@@ -172,6 +172,7 @@ nearlossless-context/
 ## License
 
 The software in this repository is licensed under the [Apache License 2.0](LICENSE).
-The paper and figures remain copyright © 2026 Nils Persson Suorra unless a
-separate license is stated. Models, datasets, and other third-party materials
-remain subject to their respective licenses.
+The paper and figures are copyright © 2026 Nils Persson Suorra and licensed
+under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Models,
+datasets, and other third-party materials remain subject to their respective
+licenses.

@@ -1,9 +1,11 @@
 # Critical-Span Retention and Query-Unknown Discovery for Long-Context KV Compression
 
-**Status:** preprint  
+**Status:** preprint, version 1.0  
+**DOI:** [10.5281/zenodo.21894255](https://doi.org/10.5281/zenodo.21894255)  
+**License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)  
 **Lab:** RTX 3090 24 GB · primary `Qwen/Qwen3-4B-Instruct-2507`  
 **Repo:** nearlossless-context  
-**Last updated:** 2026-07-18  
+**Last updated:** 2026-08-11  
 
 > Primary multi-seed tables: `results/paper_rigor_*`, `novelty_*`, `FINDINGS.md`.  
 > **Figure:** [`figures/fig1_story.png`](figures/fig1_story.png) (regenerate: `python experiments/plot_paper_figures.py`).  

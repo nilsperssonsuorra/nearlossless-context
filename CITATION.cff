@@ -7,3 +7,11 @@ authors:
   - family-names: "Persson Suorra"
     given-names: "Nils"
 repository-code: "https://github.com/nilsperssonsuorra/nearlossless-context"
+preferred-citation:
+  type: article
+  title: "Critical-Span Retention and Query-Unknown Discovery for Long-Context KV Compression"
+  authors:
+    - family-names: "Persson Suorra"
+      given-names: "Nils"
+  year: 2026
+  doi: "10.5281/zenodo.21894255"
