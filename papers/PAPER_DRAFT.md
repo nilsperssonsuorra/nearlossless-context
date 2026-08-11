@@ -1,6 +1,6 @@
 # Critical-Span Retention and Query-Unknown Discovery for Long-Context KV Compression
 
-**Status:** workshop / arXiv-style draft  
+**Status:** preprint  
 **Lab:** RTX 3090 24 GB · primary `Qwen/Qwen3-4B-Instruct-2507`  
 **Repo:** nearlossless-context  
 **Last updated:** 2026-07-18  
