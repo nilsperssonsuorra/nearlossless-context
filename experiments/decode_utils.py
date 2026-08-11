@@ -6,7 +6,10 @@ from typing import Any
 
 import torch
 
-from snapkv import compress_recent, prefill_with_snapkv
+if __package__:
+    from .snapkv import compress_recent, prefill_with_snapkv
+else:
+    from snapkv import compress_recent, prefill_with_snapkv
 
 
 def _sanitize_mask(
@@ -59,7 +62,10 @@ def prefill_method(
             kernel_size=kernel,
         )
     if method == "bytebudget":
-        from bytebudget import prefill_with_bytebudget
+        if __package__:
+            from .bytebudget import prefill_with_bytebudget
+        else:
+            from bytebudget import prefill_with_bytebudget
 
         return prefill_with_bytebudget(
             model,
@@ -91,7 +97,10 @@ def refresh_logits_after_compress(
 
     Returns (past_with_last_token_restored, next_token_logits [B, vocab]).
     """
-    from snapkv import clone_dynamic_cache, is_dynamic_cache, is_sliding_layer
+    if __package__:
+        from .snapkv import clone_dynamic_cache, is_dynamic_cache, is_sliding_layer
+    else:
+        from snapkv import clone_dynamic_cache, is_dynamic_cache, is_sliding_layer
 
     if past is None or not is_dynamic_cache(past):
         raise TypeError("refresh_logits_after_compress expects DynamicCache past")

@@ -6,8 +6,7 @@ Goal: larger usable \(L\) under ~24 GB with small decode KV.
 ## One-call API
 
 ```python
-from compress_adaptive import prefill_auto
-from decode_utils import greedy_generate
+from nearlossless_context import greedy_generate, prefill_auto
 
 # Long single-document retrieval (default: stream + novelty discovery)
 past, logits, info = prefill_auto(

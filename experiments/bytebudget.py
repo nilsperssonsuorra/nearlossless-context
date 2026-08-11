@@ -18,12 +18,10 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 
-from snapkv import (
-    cache_seq_len,
-    compress_recent,
-    is_dynamic_cache,
-    _pool1d,
-)
+if __package__:
+    from .snapkv import cache_seq_len, compress_recent, is_dynamic_cache, _pool1d
+else:
+    from snapkv import cache_seq_len, compress_recent, is_dynamic_cache, _pool1d
 
 
 def _head_concentration(vote: torch.Tensor) -> torch.Tensor:
@@ -120,7 +118,10 @@ def compress_kv_bytebudget(
     matching SnapKV structure), then optional int8 logical compression
     (dequantized to bf16/fp16 for HF decode).
     """
-    from kv_select import attention_to_vote, select_indices_ada
+    if __package__:
+        from .kv_select import attention_to_vote, select_indices_ada
+    else:
+        from kv_select import attention_to_vote, select_indices_ada
 
     if not is_dynamic_cache(past):
         raise TypeError(f"Unsupported past type: {type(past)}")
@@ -235,7 +236,10 @@ def prefill_with_bytebudget(
     use_int8: bool = True,
 ) -> tuple[Any, torch.Tensor]:
     """Returns (past, last_logits). Same full-prefill + score-clone pattern as SnapKV."""
-    from snapkv import clone_dynamic_cache, crop_cache_prefix
+    if __package__:
+        from .snapkv import clone_dynamic_cache, crop_cache_prefix
+    else:
+        from snapkv import clone_dynamic_cache, crop_cache_prefix
 
     seqlen = input_ids.shape[-1]
     if seqlen <= max_capacity:

@@ -532,9 +532,12 @@ def compress_past_capsules(
     list[FactCapsule],
     dict[int, float],
 ]:
-    from bench_h1_oracle import compress_keep_indices
-    from scorer_valley import aggregate_prefix_vote, obs_attentions_on_past
-    from snapkv import cache_seq_len, full_layer_h_kv
+    if __package__:
+        from .scorer_valley import aggregate_prefix_vote, obs_attentions_on_past
+        from .snapkv import cache_seq_len, compress_keep_indices, full_layer_h_kv
+    else:
+        from scorer_valley import aggregate_prefix_vote, obs_attentions_on_past
+        from snapkv import cache_seq_len, compress_keep_indices, full_layer_h_kv
 
     T = int(input_ids_so_far.shape[-1])
     S = cache_seq_len(past)
@@ -712,7 +715,10 @@ def prefill_streaming_capsules(
     Pin-on-exit: tokens that leave the recent window with high historical score
     become permanent absolute capsules (query-unknown fact memory).
     """
-    from snapkv import cache_seq_len
+    if __package__:
+        from .snapkv import cache_seq_len
+    else:
+        from snapkv import cache_seq_len
 
     dyn_budget = int(stream_budget)
     final_budget = int(final_budget if final_budget is not None else dyn_budget)
@@ -849,8 +855,10 @@ def prefill_streaming_oracle_pin(
     If this succeeds multi-seed where scored capsules fail → discovery is the gap.
     If this also fails → stream peak budget / RoPE/layout issues dominate.
     """
-    from bench_h1_oracle import compress_keep_indices
-    from snapkv import cache_seq_len
+    if __package__:
+        from .snapkv import cache_seq_len, compress_keep_indices
+    else:
+        from snapkv import cache_seq_len, compress_keep_indices
 
     dyn_budget = int(stream_budget)
     final_budget = int(final_budget if final_budget is not None else dyn_budget)

@@ -39,6 +39,41 @@ def is_hybrid_cache(past: Any) -> bool:
     return any(is_sliding_layer(layer) for layer in past.layers)
 
 
+def compress_keep_indices(past: Any, keep: list[int]) -> Any:
+    """Keep selected positions in full-attention cache layers, in place."""
+    if not is_dynamic_cache(past):
+        raise TypeError(type(past))
+    if not keep:
+        raise ValueError("empty keep set")
+
+    device = next(
+        (layer.keys.device for layer in past.layers if layer.keys is not None),
+        None,
+    )
+    if device is None:
+        raise ValueError("empty cache")
+
+    keep_t = torch.tensor(
+        sorted(set(int(i) for i in keep)), device=device, dtype=torch.long
+    )
+    for layer in past.layers:
+        if layer.keys is None or is_sliding_layer(layer):
+            continue
+        size = int(layer.keys.shape[-2])
+        if int(keep_t.max()) >= size or int(keep_t.min()) < 0:
+            indices = keep_t[(keep_t >= 0) & (keep_t < size)]
+            if indices.numel() == 0:
+                count = min(len(keep), size)
+                indices = torch.arange(
+                    size - count, size, device=device, dtype=torch.long
+                )
+        else:
+            indices = keep_t
+        layer.keys = layer.keys.index_select(2, indices).contiguous()
+        layer.values = layer.values.index_select(2, indices).contiguous()
+    return past
+
+
 def cache_seq_len(past: Any) -> int:
     """
     Compressible KV length for bookkeeping.
@@ -190,7 +225,10 @@ def compress_kv_snapkv(
     Mutates DynamicCache in place.
     attentions: from obs-window forward, each [B, H_q, q_len, kv_len]
     """
-    from kv_select import attention_to_vote, select_indices_uniform
+    if __package__:
+        from .kv_select import attention_to_vote, select_indices_uniform
+    else:
+        from kv_select import attention_to_vote, select_indices_uniform
 
     if max_capacity <= window_size:
         raise ValueError("max_capacity must be > window_size")

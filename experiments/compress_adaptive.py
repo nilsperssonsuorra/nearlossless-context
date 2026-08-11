@@ -11,19 +11,34 @@ from typing import Any
 
 import torch
 
-from adaptive import (  # noqa: F401
-    AdaptivePolicy,
-    model_id_from_model,
-    policy_for,
-    policy_from_scores,
-)
-from scorer_valley import (
-    aggregate_prefix_vote,
-    compress_with_seed_valley,
-    obs_attentions,
-    prefill_streaming_valley,
-)
-from snapkv import cache_seq_len, full_layer_h_kv, prefill_chunked
+if __package__:
+    from .adaptive import (  # noqa: F401
+        AdaptivePolicy,
+        model_id_from_model,
+        policy_for,
+        policy_from_scores,
+    )
+    from .scorer_valley import (
+        aggregate_prefix_vote,
+        compress_with_seed_valley,
+        obs_attentions,
+        prefill_streaming_valley,
+    )
+    from .snapkv import cache_seq_len, full_layer_h_kv, prefill_chunked
+else:
+    from adaptive import (  # noqa: F401
+        AdaptivePolicy,
+        model_id_from_model,
+        policy_for,
+        policy_from_scores,
+    )
+    from scorer_valley import (
+        aggregate_prefix_vote,
+        compress_with_seed_valley,
+        obs_attentions,
+        prefill_streaming_valley,
+    )
+    from snapkv import cache_seq_len, full_layer_h_kv, prefill_chunked
 
 
 def _resolve_model_id(model, model_id: str | None) -> str | None:
@@ -146,7 +161,10 @@ def prefill_posthoc_adaptive(
 
 def _apply_int8_logical(past) -> tuple[Any, int]:
     """Fake-quant KV to int8 (dequant for HF); return logical nbytes."""
-    from bytebudget import quant_dequant_int8
+    if __package__:
+        from .bytebudget import quant_dequant_int8
+    else:
+        from bytebudget import quant_dequant_int8
 
     logical = 0
     for layer in past.layers:
@@ -210,11 +228,18 @@ def prefill_stream_adaptive(
         auto_raise_budget = n_entities is None and discovery == "attn"
 
     if discovery in ("novelty", "hybrid", "query_hold"):
-        from novelty_detect import (
-            prefill_streaming_hybrid_pin,
-            prefill_streaming_novelty_pin,
-            prefill_streaming_query_hold,
-        )
+        if __package__:
+            from .novelty_detect import (
+                prefill_streaming_hybrid_pin,
+                prefill_streaming_novelty_pin,
+                prefill_streaming_query_hold,
+            )
+        else:
+            from novelty_detect import (
+                prefill_streaming_hybrid_pin,
+                prefill_streaming_novelty_pin,
+                prefill_streaming_query_hold,
+            )
         from transformers import AutoTokenizer
 
         tok = tokenizer

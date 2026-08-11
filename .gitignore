@@ -11,6 +11,17 @@ results/*.json
 *.safetensors
 .cache/
 huggingface/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
 
 # LaTeX build junk (keep papers/main.pdf + main.tex)
 papers/*.aux

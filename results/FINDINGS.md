@@ -4,7 +4,7 @@
 **Model:** `Qwen/Qwen3-4B-Instruct-2507`  
 **Policy:** ctx ≤ 4096 for interactive full-KV jobs  
 
-**Project goal:** maximize \(L\) at ε≈0 quality under 24 GB (see root README + `RESEARCH_BRIEF.md`).
+**Project goal:** maximize \(L\) at ε≈0 quality under 24 GB (see the root README and paper).
 
 ---
 

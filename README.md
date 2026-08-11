@@ -2,15 +2,14 @@
 
 **Near-lossless long-context inference under fixed VRAM** — critical-span retention, query-unknown discovery, and a measured peak/quality Pareto.
 
-Research / portfolio artifact (workshop–arXiv style). Not a product. Not “slightly better SnapKV.”
+Research code and experiments accompanying the paper draft. This is an experimental prototype, not a production library.
 
 | | |
 |--|--|
 | **Paper** | [`papers/main.pdf`](papers/main.pdf) |
 | **Figure** | [`papers/figures/fig1_story.png`](papers/figures/fig1_story.png) |
 | **Findings** | [`results/FINDINGS.md`](results/FINDINGS.md) |
-| **Portfolio blurb** | [`PORTFOLIO.md`](PORTFOLIO.md) |
-| **Release** | tag `v0.1-arxiv` (code + paper freeze for arXiv) |
+| **Usage** | [`USAGE.md`](USAGE.md) |
 
 ---
 
@@ -51,7 +50,7 @@ General long-context SOTA, full RULER/LongBench leaderboards, production int8 ke
 
 Run a small open model (**~4B**) with **much more context** than naive inference allows, on **consumer hardware**, with **little or no quality loss** vs full key–value (KV) cache on retrieval-critical tasks.
 
-Formally (see `RESEARCH_BRIEF.md`):
+Formally:
 
 > Maximize \(L_\varepsilon\) s.t. quality ≥ \((1-\varepsilon)\times\) full-KV on suite \(\mathcal{S}\), under **≤24 GB** and usable speed.
 
@@ -82,15 +81,19 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -U pip
 pip install -r requirements.txt
+pip install -e .
 # CUDA torch: https://pytorch.org/get-started/locally/ if the default wheel is CPU-only
 ```
+
+The distribution name is `nearlossless-context`; the Python import package is
+`nearlossless_context`. The package is currently an alpha research API.
 
 ---
 
 ## Quick start (API)
 
 ```python
-from compress_adaptive import prefill_auto
+from nearlossless_context import prefill_auto
 
 past, logits, info = prefill_auto(
     model, input_ids, mode="stream", discovery="novelty"
@@ -133,9 +136,7 @@ Outputs: `results/*.csv` + `*.json` (gitignored). Narrative: [`results/FINDINGS.
 
 ## Status
 
-Core arc is **measured and written up**: mechanism → discovery gap → sticky novelty → long-\(L\) + stresses → public LongBench decomposition (posthoc UB + query_hold Pareto) → peer-reviewed claim fixes.
-
-**Next (outside the lab):** arXiv submit; optional workshop CFP; show [`PORTFOLIO.md`](PORTFOLIO.md) in applications. Not more needle grids.
+Core arc is **measured and written up**: mechanism → discovery gap → sticky novelty → long-\(L\) + stresses → public LongBench decomposition (posthoc UB + query_hold Pareto).
 
 ---
 
@@ -146,11 +147,8 @@ Core arc is **measured and written up**: mechanism → discovery gap → sticky 
 | **`papers/main.pdf`** | **Readable paper draft (start here)** |
 | `papers/PAPER_DRAFT.md` | Markdown twin of the draft |
 | `papers/figures/fig1_story.png` | H1 / discovery / long-\(L\) / peak-cache figure |
-| `PORTFOLIO.md` | One-liner + resume / LinkedIn blurbs |
 | `USAGE.md` | `prefill_auto` + length guide |
 | `results/FINDINGS.md` | Full experimental tables / verdicts |
-| `RESEARCH_BRIEF.md` | North-star brief |
-| `RESEARCH_SUMMARY.md` | Short hire-aligned summary |
 
 Related work is **crowded** (eviction + KV quant). Success here is **raising \(L\) at ε≈0 with honest multi-seed claims** and a clear discovery diagnosis—not renaming SnapKV.
 
@@ -163,9 +161,17 @@ nearlossless-context/
   experiments/     # benches + novelty + adaptive API
   papers/          # main.tex / main.pdf / figures
   results/         # FINDINGS.md (+ local CSVs gitignored)
-  PORTFOLIO.md
   USAGE.md
   requirements.txt
 ```
 
 **GitHub:** [nilsperssonsuorra/nearlossless-context](https://github.com/nilsperssonsuorra/nearlossless-context)
+
+---
+
+## License
+
+The software in this repository is licensed under the [Apache License 2.0](LICENSE).
+The paper and figures remain copyright © 2026 Nils Persson Suorra unless a
+separate license is stated. Models, datasets, and other third-party materials
+remain subject to their respective licenses.

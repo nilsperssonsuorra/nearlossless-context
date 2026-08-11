@@ -18,7 +18,10 @@ from typing import Any
 
 import torch
 
-from capsules import FactCapsule, _components_to_capsules
+if __package__:
+    from .capsules import FactCapsule, _components_to_capsules
+else:
+    from capsules import FactCapsule, _components_to_capsules
 
 
 _DIGIT_RE = re.compile(r"\d")
@@ -216,8 +219,10 @@ def prefill_streaming_novelty_pin(
         evicted (avoids re-rank thrash dropping a previously found secret)
       - pin packing ranked by novelty score (not cache order) under budget
     """
-    from bench_h1_oracle import compress_keep_indices
-    from snapkv import cache_seq_len
+    if __package__:
+        from .snapkv import cache_seq_len, compress_keep_indices
+    else:
+        from snapkv import cache_seq_len, compress_keep_indices
 
     dyn_budget = int(stream_budget)
     final_budget = int(final_budget if final_budget is not None else dyn_budget)
@@ -394,12 +399,20 @@ def _attention_peak_abs(
     Map mid/query-window attention peaks in *cache* index space to absolute
     positions via abs_list. Used for hybrid discovery.
     """
-    from scorer_valley import (
-        aggregate_prefix_vote,
-        find_local_maxima,
-        obs_attentions_on_past,
-    )
-    from snapkv import cache_seq_len, full_layer_h_kv
+    if __package__:
+        from .scorer_valley import (
+            aggregate_prefix_vote,
+            find_local_maxima,
+            obs_attentions_on_past,
+        )
+        from .snapkv import cache_seq_len, full_layer_h_kv
+    else:
+        from scorer_valley import (
+            aggregate_prefix_vote,
+            find_local_maxima,
+            obs_attentions_on_past,
+        )
+        from snapkv import cache_seq_len, full_layer_h_kv
 
     T = int(input_ids_so_far.shape[-1])
     S = cache_seq_len(past_kv)
@@ -483,8 +496,10 @@ def prefill_streaming_hybrid_pin(
     the question arrives so query-aware re-rank has survivors to promote.
     Peak cache ≈ hold_budget + chunk_size.
     """
-    from bench_h1_oracle import compress_keep_indices
-    from snapkv import cache_seq_len
+    if __package__:
+        from .snapkv import cache_seq_len, compress_keep_indices
+    else:
+        from snapkv import cache_seq_len, compress_keep_indices
 
     final_budget = int(final_budget if final_budget is not None else stream_budget)
     if hold_budget is not None:
@@ -598,11 +613,18 @@ def prefill_streaming_hybrid_pin(
 
     def _attn_rank_vector(past_kv, end: int) -> list[float] | None:
         """Per-cache-index attention score for query window (last w tokens)."""
-        from scorer_valley import (
-            aggregate_prefix_vote,
-            obs_attentions_on_past,
-        )
-        from snapkv import full_layer_h_kv
+        if __package__:
+            from .scorer_valley import (
+                aggregate_prefix_vote,
+                obs_attentions_on_past,
+            )
+            from .snapkv import full_layer_h_kv
+        else:
+            from scorer_valley import (
+                aggregate_prefix_vote,
+                obs_attentions_on_past,
+            )
+            from snapkv import full_layer_h_kv
 
         T = end
         S = cache_seq_len(past_kv)

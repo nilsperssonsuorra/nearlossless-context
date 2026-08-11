@@ -10,8 +10,12 @@ from typing import Any
 
 import torch
 
-from kv_select import attention_to_vote
-from snapkv import clone_dynamic_cache, crop_cache_prefix, prefill_chunked  # noqa: F401
+if __package__:
+    from .kv_select import attention_to_vote
+    from .snapkv import clone_dynamic_cache, crop_cache_prefix, prefill_chunked  # noqa: F401
+else:
+    from kv_select import attention_to_vote
+    from snapkv import clone_dynamic_cache, crop_cache_prefix, prefill_chunked  # noqa: F401
 
 
 @torch.inference_mode()
@@ -495,8 +499,10 @@ def compress_with_seed_valley(
     Requires cache_seq_len(past) == input_ids length (full post-hoc path).
     mode: "valley" | "multipeak"
     """
-    from bench_h1_oracle import compress_keep_indices
-    from snapkv import cache_seq_len
+    if __package__:
+        from .snapkv import cache_seq_len, compress_keep_indices
+    else:
+        from snapkv import cache_seq_len, compress_keep_indices
 
     seq_len = int(input_ids.shape[-1])
     if seq_len <= budget:
@@ -514,7 +520,10 @@ def compress_with_seed_valley(
         past = compress_keep_indices(past, keep)
         return past, keep
 
-    from snapkv import full_layer_h_kv
+    if __package__:
+        from .snapkv import full_layer_h_kv
+    else:
+        from snapkv import full_layer_h_kv
 
     h_kv = full_layer_h_kv(past)
     score = aggregate_prefix_vote(
@@ -555,7 +564,10 @@ def obs_attentions_on_past(
     past must end with the same tokens as obs_ids (recent always kept).
     abs_obs_start: absolute RoPE index of obs_ids[0].
     """
-    from snapkv import cache_seq_len
+    if __package__:
+        from .snapkv import cache_seq_len
+    else:
+        from snapkv import cache_seq_len
 
     window = int(obs_ids.shape[-1])
     S = cache_seq_len(past)
@@ -624,8 +636,10 @@ def compress_past_seed_valley(
     Compress current past (possibly already shorter than prompt) to `budget`.
     Uses last window of input_ids_so_far as observation queries.
     """
-    from bench_h1_oracle import compress_keep_indices
-    from snapkv import cache_seq_len
+    if __package__:
+        from .snapkv import cache_seq_len, compress_keep_indices
+    else:
+        from snapkv import cache_seq_len, compress_keep_indices
 
     T = int(input_ids_so_far.shape[-1])
     S = cache_seq_len(past)
@@ -646,7 +660,10 @@ def compress_past_seed_valley(
         past = compress_keep_indices(past, keep)
         return past, keep
 
-    from snapkv import full_layer_h_kv
+    if __package__:
+        from .snapkv import full_layer_h_kv
+    else:
+        from snapkv import full_layer_h_kv
 
     h_kv = full_layer_h_kv(past)
     score = aggregate_prefix_vote(
@@ -705,8 +722,12 @@ def prefill_streaming_valley(
 
     Returns (past, last_logits, stats).
     """
-    from adaptive import estimate_n_entities_from_scores
-    from snapkv import cache_nbytes, cache_seq_len
+    if __package__:
+        from .adaptive import estimate_n_entities_from_scores
+        from .snapkv import cache_nbytes, cache_seq_len
+    else:
+        from adaptive import estimate_n_entities_from_scores
+        from snapkv import cache_nbytes, cache_seq_len
 
     dyn_budget = int(stream_budget)
     dyn_R = int(expand_radius)

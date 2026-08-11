@@ -23,13 +23,7 @@
 }
 
 \title{\textbf{Near-Lossless Long Context under Fixed VRAM\\via Critical-Span Retention}}
-\author{
-  Workshop / arXiv-style draft\\
-  Lab: RTX 3090 24\,GB \quad
-  Primary: \texttt{Qwen/Qwen3-4B-Instruct-2507}\\
-  Repo: \texttt{nearlossless-context}\quad
-  Updated: 2026-07-18
-}
+\author{Nils Persson Suorra}
 \date{}
 
 \begin{document}
@@ -279,8 +273,6 @@ Peak cache under novelty stays $\sim$1024 tokens at all three lengths.
   \item On a fixed public LongBench slice, \textbf{posthoc query-aware compression reaches 0.95$\times$ full F1} at final $B{=}512$ (peak=$L$), while online novelty lags ($\sim$0.64$\times$ at peak$\sim$1k); \textbf{query\_hold} recovers a measured Pareto (best $\sim$0.92$\times$ full F1 at peak $\sim$2.5k). Absolute full F1 is modest under 4B/greedy/4k truncate.
 \end{itemize}
 
-\subsection{What we do \emph{not} claim}
-
 \begin{table}[h]
 \centering
 \caption{Scope boundaries (honest).}
@@ -312,6 +304,7 @@ Peak VRAM $=$ final decode KV &
 \end{tabular}
 \end{table}
 
+\clearpage
 \subsection{Threats to validity}
 
 \begin{itemize}[leftmargin=*,itemsep=2pt]

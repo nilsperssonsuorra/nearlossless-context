@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this software or its results, please cite the accompanying paper."
+title: "Near-Lossless Long Context under Fixed VRAM via Critical-Span Retention"
+type: software
+license: Apache-2.0
+authors:
+  - family-names: "Persson Suorra"
+    given-names: "Nils"
+repository-code: "https://github.com/nilsperssonsuorra/nearlossless-context"
