@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nearlossless-context"
-version = "0.1.0"
+version = "0.1.1"
 description = "Training-free long-context KV compression under fixed VRAM"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -46,7 +46,10 @@ test = ["pytest>=8.0"]
 [project.urls]
 Homepage = "https://github.com/nilsperssonsuorra/nearlossless-context"
 Repository = "https://github.com/nilsperssonsuorra/nearlossless-context"
-Paper = "https://github.com/nilsperssonsuorra/nearlossless-context/blob/main/papers/main.pdf"
+Documentation = "https://github.com/nilsperssonsuorra/nearlossless-context/blob/main/USAGE.md"
+Paper = "https://doi.org/10.5281/zenodo.21894255"
+Issues = "https://github.com/nilsperssonsuorra/nearlossless-context/issues"
+Changelog = "https://github.com/nilsperssonsuorra/nearlossless-context/releases"
 
 [tool.setuptools]
 packages = ["nearlossless_context"]

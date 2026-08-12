@@ -5,7 +5,15 @@
 
 **A research library for memory-efficient long-context inference under fixed VRAM.** It implements critical-span retention, query-unknown discovery, and measured KV-cache quality/peak-memory tradeoffs for Hugging Face models.
 
-## Install from source
+## Install
+
+```powershell
+pip install nearlossless-context
+```
+
+The distribution name is `nearlossless-context`; the import package is `nearlossless_context`. Install a CUDA-enabled PyTorch build appropriate for your system when GPU execution is required.
+
+For development or paper reproduction, install from source:
 
 ```powershell
 git clone https://github.com/nilsperssonsuorra/nearlossless-context.git
@@ -15,8 +23,6 @@ python -m venv .venv
 python -m pip install --upgrade pip
 pip install -e .
 ```
-
-Install a CUDA-enabled PyTorch build appropriate for your system when GPU execution is required. The distribution name is `nearlossless-context`; the import package is `nearlossless_context`.
 
 ## Quick start
 
@@ -46,7 +52,7 @@ Use `discovery="query_hold"` for the measured LongBench peak/quality tradeoff, o
 | | |
 |--|--|
 | **Paper** | [`papers/main.pdf`](papers/main.pdf) · [doi:10.5281/zenodo.21894255](https://doi.org/10.5281/zenodo.21894255) |
-| **Software release** | [`v0.1.0`](https://github.com/nilsperssonsuorra/nearlossless-context/releases/tag/v0.1.0) · [doi:10.5281/zenodo.21894720](https://doi.org/10.5281/zenodo.21894720) |
+| **Software releases** | [GitHub](https://github.com/nilsperssonsuorra/nearlossless-context/releases) · [all-version DOI: 10.5281/zenodo.21894719](https://doi.org/10.5281/zenodo.21894719) |
 | **Figure** | [`papers/figures/fig1_story.png`](papers/figures/fig1_story.png) |
 | **Findings** | [`results/FINDINGS.md`](results/FINDINGS.md) |
 | **Usage** | [`USAGE.md`](USAGE.md) |
