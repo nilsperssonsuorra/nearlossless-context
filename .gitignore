@@ -33,5 +33,8 @@ papers/*.synctex.gz
 papers/*.fls
 papers/*.fdb_latexmk
 
+# Locally generated release and submission bundles
+/output/
+
 # Large downloaded benchmarks
 data/longbench/

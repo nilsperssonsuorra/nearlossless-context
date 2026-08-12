@@ -3,9 +3,45 @@
 [![Paper DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21894255.svg)](https://doi.org/10.5281/zenodo.21894255)
 [![Software DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21894719.svg)](https://doi.org/10.5281/zenodo.21894719)
 
-**Near-lossless long-context inference under fixed VRAM** — critical-span retention, query-unknown discovery, and a measured peak/quality Pareto.
+**A research library for memory-efficient long-context inference under fixed VRAM.** It implements critical-span retention, query-unknown discovery, and measured KV-cache quality/peak-memory tradeoffs for Hugging Face models.
 
-Research code and experiments accompanying the preprint. This is an experimental prototype, not a production library.
+## Install from source
+
+```powershell
+git clone https://github.com/nilsperssonsuorra/nearlossless-context.git
+cd nearlossless-context
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -e .
+```
+
+Install a CUDA-enabled PyTorch build appropriate for your system when GPU execution is required. The distribution name is `nearlossless-context`; the import package is `nearlossless_context`.
+
+## Quick start
+
+```python
+from nearlossless_context import greedy_generate, prefill_auto
+
+# Default online path: sticky surface-novelty discovery.
+past, logits, info = prefill_auto(
+    model,
+    input_ids,
+    mode="stream",
+    tokenizer=tokenizer,
+)
+
+tokens = greedy_generate(
+    model,
+    past,
+    logits,
+    max_new,
+    eos_id=tokenizer.eos_token_id,
+    next_position=input_ids.shape[-1],
+)
+```
+
+Use `discovery="query_hold"` for the measured LongBench peak/quality tradeoff, or `mode="posthoc"` when query-aware scorer quality matters more than peak prefill memory. See [`USAGE.md`](USAGE.md) for model-family floors, multi-document settings, and generation requirements.
 
 | | |
 |--|--|
@@ -77,38 +113,6 @@ Formally:
 
 ---
 
-## Setup
-
-```powershell
-cd path\to\nearlossless-context
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -U pip
-pip install -r requirements.txt
-pip install -e .
-# CUDA torch: https://pytorch.org/get-started/locally/ if the default wheel is CPU-only
-```
-
-The distribution name is `nearlossless-context`; the Python import package is
-`nearlossless_context`. The package is currently an alpha research API.
-
----
-
-## Quick start (API)
-
-```python
-from nearlossless_context import prefill_auto
-
-past, logits, info = prefill_auto(
-    model, input_ids, mode="stream", discovery="novelty"
-)
-# discovery="query_hold" for LongBench-style peak/quality tradeoff
-```
-
-More detail: [`USAGE.md`](USAGE.md).
-
----
-
 ## Experiments
 
 | Script | Purpose |
@@ -141,6 +145,37 @@ Outputs: `results/*.csv` + `*.json` (gitignored). Narrative: [`results/FINDINGS.
 ## Status
 
 Core arc is **measured and written up**: mechanism → discovery gap → sticky novelty → long-\(L\) + stresses → public LongBench decomposition (posthoc UB + query_hold Pareto).
+
+This is an **experimental alpha API** intended for research and evaluation. It is not yet a production serving backend. Interfaces and measured operating points may change as integration work expands.
+
+---
+
+## Roadmap
+
+The project is moving from a reproducible research prototype toward an integration-ready long-context inference library. Unchecked items are planned work, not claims about current capabilities.
+
+### Near term
+
+- [ ] Validate wheel and source-distribution installation in clean environments
+- [ ] Publish the package to PyPI after TestPyPI verification
+- [ ] Expand unit tests and CPU-compatible public-API smoke tests
+- [ ] Stabilize the compression-policy interface and runnable examples
+- [ ] Add lightweight reproducibility checks to CI
+
+### Integration work
+
+- [ ] Prototype integration with a vLLM-compatible KV-cache or attention extension point
+- [ ] Investigate an SGLang integration path
+- [ ] Add real quantized KV storage and kernel support
+- [ ] Extend evaluation across additional models, context lengths, and public datasets
+
+### Longer term
+
+- [ ] Add scheduled GPU benchmarking with regression tracking
+- [ ] Evaluate batching, concurrency, and production-serving constraints
+- [ ] Prepare upstream draft PRs once interfaces and benchmarks are sufficiently mature
+
+Priorities may change as benchmark evidence and upstream interfaces evolve. Contributions and reproducible issue reports are welcome.
 
 ---
 
