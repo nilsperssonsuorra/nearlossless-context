@@ -3,6 +3,7 @@
 [![Paper DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21894255.svg)](https://doi.org/10.5281/zenodo.21894255)
 [![Software DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21894719.svg)](https://doi.org/10.5281/zenodo.21894719)
 [![PyPI](https://img.shields.io/pypi/v/nearlossless-context.svg)](https://pypi.org/project/nearlossless-context/)
+[![CI](https://github.com/nilsperssonsuorra/nearlossless-context/actions/workflows/ci.yml/badge.svg)](https://github.com/nilsperssonsuorra/nearlossless-context/actions/workflows/ci.yml)
 
 **A research library for memory-efficient long-context inference under fixed VRAM.** It implements critical-span retention, query-unknown discovery, and measured KV-cache quality/peak-memory tradeoffs for Hugging Face models.
 

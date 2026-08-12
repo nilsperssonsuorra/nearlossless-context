@@ -35,6 +35,9 @@ papers/*.fdb_latexmk
 
 # Locally generated release and submission bundles
 /output/
+/build/
+/dist/
+/*.egg-info/
 
 # Large downloaded benchmarks
 data/longbench/
