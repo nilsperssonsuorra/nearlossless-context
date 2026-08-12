@@ -2,6 +2,7 @@
 
 [![Paper DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21894255.svg)](https://doi.org/10.5281/zenodo.21894255)
 [![Software DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21894719.svg)](https://doi.org/10.5281/zenodo.21894719)
+[![PyPI](https://img.shields.io/pypi/v/nearlossless-context.svg)](https://pypi.org/project/nearlossless-context/)
 
 **A research library for memory-efficient long-context inference under fixed VRAM.** It implements critical-span retention, query-unknown discovery, and measured KV-cache quality/peak-memory tradeoffs for Hugging Face models.
 
@@ -52,7 +53,7 @@ Use `discovery="query_hold"` for the measured LongBench peak/quality tradeoff, o
 | | |
 |--|--|
 | **Paper** | [`papers/main.pdf`](papers/main.pdf) · [doi:10.5281/zenodo.21894255](https://doi.org/10.5281/zenodo.21894255) |
-| **Software releases** | [GitHub](https://github.com/nilsperssonsuorra/nearlossless-context/releases) · [all-version DOI: 10.5281/zenodo.21894719](https://doi.org/10.5281/zenodo.21894719) |
+| **Software release** | [`v0.1.1`](https://github.com/nilsperssonsuorra/nearlossless-context/releases/tag/v0.1.1) · [doi:10.5281/zenodo.21909934](https://doi.org/10.5281/zenodo.21909934) · [all versions](https://doi.org/10.5281/zenodo.21894719) |
 | **Figure** | [`papers/figures/fig1_story.png`](papers/figures/fig1_story.png) |
 | **Findings** | [`results/FINDINGS.md`](results/FINDINGS.md) |
 | **Usage** | [`USAGE.md`](USAGE.md) |
