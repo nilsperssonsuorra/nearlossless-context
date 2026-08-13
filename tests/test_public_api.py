@@ -4,6 +4,7 @@ import unittest
 
 import nearlossless_context as nlc
 import torch
+from nearlossless_context.example import _resolve_device, build_parser
 from nearlossless_context.snapkv import compress_keep_indices
 
 
@@ -41,3 +42,14 @@ class PublicApiTests(unittest.TestCase):
 
         self.assertEqual(cache.layers[0].keys.flatten().tolist(), [1.0, 3.0])
         self.assertEqual(cache.layers[1].keys.shape[-2], 5)
+
+    def test_example_defaults_are_cpu_safe(self) -> None:
+        args = build_parser().parse_args([])
+
+        self.assertEqual(args.device, "auto")
+        self.assertEqual(args.model, "Qwen/Qwen2.5-0.5B-Instruct")
+        self.assertEqual(_resolve_device("auto", cuda_available=False), "cpu")
+
+    def test_example_rejects_unavailable_cuda(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "CUDA was requested"):
+            _resolve_device("cuda", cuda_available=False)

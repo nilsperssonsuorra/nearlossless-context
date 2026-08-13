@@ -28,6 +28,20 @@ pip install -e .
 
 ## Quick start
 
+Run the packaged end-to-end example. The first run downloads
+`Qwen/Qwen2.5-0.5B-Instruct` (about 0.5B parameters):
+
+```powershell
+nearlossless-example
+```
+
+It automatically uses CUDA when available and otherwise runs on CPU with a
+shorter prompt. The command reports the original, peak, and retained cache-token
+counts before printing the generated answer. Override the defaults with, for
+example, `nearlossless-example --device cuda --prompt-tokens 4096`.
+
+The equivalent library API is:
+
 ```python
 from nearlossless_context import greedy_generate, prefill_auto
 

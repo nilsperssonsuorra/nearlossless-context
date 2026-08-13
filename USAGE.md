@@ -3,6 +3,32 @@
 Primary model: `Qwen/Qwen3-4B-Instruct-2507`  
 Goal: larger usable \(L\) under ~24 GB with small decode KV.
 
+## Runnable example
+
+After `pip install nearlossless-context`, run:
+
+```powershell
+nearlossless-example
+```
+
+The supported Transformers range is `>=4.57,<5`; Transformers 5 compatibility
+has not yet been validated against the mutable KV-cache internals.
+
+The default `Qwen/Qwen2.5-0.5B-Instruct` model is intended as an accessible API
+demonstration, not as a reproduction of the paper's quality results. The command
+uses CUDA automatically when available; on CPU it uses float32 and a shorter
+prompt, so expect slower inference and roughly 2 GB or more of available RAM.
+Use the paper's primary Qwen3-4B model and the documented experiment commands for
+research reproduction.
+
+Useful overrides:
+
+```powershell
+nearlossless-example --device cpu --prompt-tokens 768
+nearlossless-example --device cuda --prompt-tokens 4096 --max-new-tokens 32
+nearlossless-example --help
+```
+
 ## One-call API
 
 ```python
