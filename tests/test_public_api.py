@@ -23,7 +23,7 @@ class _Cache:
 
 class PublicApiTests(unittest.TestCase):
     def test_public_api_is_importable(self) -> None:
-        self.assertEqual(nlc.__version__, "0.1.1")
+        self.assertEqual(nlc.__version__, "0.2.0")
         self.assertTrue(callable(nlc.prefill_auto))
         self.assertTrue(callable(nlc.greedy_generate))
         self.assertEqual(

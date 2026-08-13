@@ -68,7 +68,7 @@ Use `discovery="query_hold"` for the measured LongBench peak/quality tradeoff, o
 | | |
 |--|--|
 | **Paper** | [`papers/main.pdf`](papers/main.pdf) · [doi:10.5281/zenodo.21894255](https://doi.org/10.5281/zenodo.21894255) |
-| **Software release** | [`v0.1.1`](https://github.com/nilsperssonsuorra/nearlossless-context/releases/tag/v0.1.1) · [doi:10.5281/zenodo.21909934](https://doi.org/10.5281/zenodo.21909934) · [all versions](https://doi.org/10.5281/zenodo.21894719) |
+| **Software release** | [`v0.2.0`](https://github.com/nilsperssonsuorra/nearlossless-context/releases/tag/v0.2.0) · [doi:10.5281/zenodo.21894719](https://doi.org/10.5281/zenodo.21894719) |
 | **Figure** | [`papers/figures/fig1_story.png`](papers/figures/fig1_story.png) |
 | **Findings** | [`results/FINDINGS.md`](results/FINDINGS.md) |
 | **Usage** | [`USAGE.md`](USAGE.md) |
@@ -178,11 +178,11 @@ The project is moving from a reproducible research prototype toward an integrati
 
 ### Near term
 
-- [ ] Validate wheel and source-distribution installation in clean environments
-- [ ] Publish the package to PyPI after TestPyPI verification
-- [ ] Expand unit tests and CPU-compatible public-API smoke tests
-- [ ] Stabilize the compression-policy interface and runnable examples
-- [ ] Add lightweight reproducibility checks to CI
+- [x] Validate wheel and source-distribution installation in clean environments
+- [x] Publish the package to PyPI after TestPyPI verification
+- [x] Expand unit tests and CPU-compatible public-API smoke tests
+- [x] Stabilize the compression-policy interface and runnable examples
+- [x] Add lightweight reproducibility checks to CI
 
 ### Integration work
 

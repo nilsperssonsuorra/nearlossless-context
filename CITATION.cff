@@ -3,9 +3,9 @@ message: "If you use this software or its results, please cite the accompanying 
 title: "Near-Lossless Long Context under Fixed VRAM via Critical-Span Retention"
 type: software
 license: Apache-2.0
-version: 0.1.1
-doi: "10.5281/zenodo.21909934"
-date-released: 2026-08-12
+version: 0.2.0
+doi: "10.5281/zenodo.21894719"
+date-released: 2026-08-13
 authors:
   - family-names: "Persson Suorra"
     given-names: "Nils"
