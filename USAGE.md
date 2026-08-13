@@ -11,7 +11,7 @@ After `pip install nearlossless-context`, run:
 nearlossless-example
 ```
 
-The supported Transformers range is `>=4.57,<5`; Transformers 5 compatibility
+The supported Transformers range is `>=4.57.1,<5`; Transformers 5 compatibility
 has not yet been validated against the mutable KV-cache internals.
 
 The default `Qwen/Qwen2.5-0.5B-Instruct` model is intended as an accessible API

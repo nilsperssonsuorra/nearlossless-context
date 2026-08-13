@@ -29,7 +29,7 @@ classifiers = [
 ]
 dependencies = [
   "torch>=2.4.0",
-  "transformers>=4.57.0,<5",
+  "transformers>=4.57.1,<5",
   "accelerate>=1.0.0",
   "sentencepiece>=0.2.0",
   "protobuf>=4.25.0",
