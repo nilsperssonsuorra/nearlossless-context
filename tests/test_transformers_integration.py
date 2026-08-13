@@ -60,6 +60,15 @@ def test_real_dynamic_cache_compresses_and_decodes_offline() -> None:
     budget = int(info["policy"]["stream_budget"])
     stats = info["stats"]
 
+    assert {"path", "L", "policy", "model_id"} <= info.keys()
+    assert {
+        "discovery",
+        "n_entities_hat",
+        "stats",
+        "logical_kv_mb_int8",
+        "use_int8",
+    } <= info.keys()
+    assert {"stream_budget", "final_budget", "n_compress"} <= stats.keys()
     assert isinstance(past, DynamicCache)
     assert int(stats["n_compress"]) >= 1
     assert int(stats["peak_cache"]) > budget
@@ -77,3 +86,39 @@ def test_real_dynamic_cache_compresses_and_decodes_offline() -> None:
 
     assert len(generated) == 2
     assert all(isinstance(token_id, int) for token_id in generated)
+
+
+def test_full_and_posthoc_metadata_contracts_offline() -> None:
+    input_ids = torch.arange(64, dtype=torch.long).unsqueeze(0) % 128
+    common = {"path", "L", "policy", "model_id"}
+
+    _, _, full_info = prefill_auto(
+        _tiny_qwen2(),
+        input_ids,
+        mode="full",
+        chunk_size=32,
+        model_id="Qwen/Qwen2.5-tiny-integration-test",
+    )
+    assert common <= full_info.keys()
+    assert {"cache_tokens"} <= full_info.keys()
+    assert full_info["policy"] is None
+    assert full_info["cache_tokens"] == 64
+
+    _, _, posthoc_info = prefill_auto(
+        _tiny_qwen2(),
+        input_ids,
+        mode="posthoc",
+        chunk_size=32,
+        window_size=16,
+        n_entities=1,
+        model_id="Qwen/Qwen2.5-tiny-integration-test",
+    )
+    assert common <= posthoc_info.keys()
+    assert {
+        "n_entities_hat",
+        "keep_count",
+        "cache_tokens",
+        "logical_kv_mb_int8",
+        "use_int8",
+    } <= posthoc_info.keys()
+    assert posthoc_info["policy"] is not None

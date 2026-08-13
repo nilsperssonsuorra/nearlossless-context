@@ -69,6 +69,36 @@ toks = greedy_generate(
 )
 ```
 
+## Public metadata reference
+
+`prefill_auto` keeps its backward-compatible return shape:
+`(past_key_values, last_logits, info)`. The exported `PrefillInfo`, `PolicyInfo`,
+and `CompressionStats` `TypedDict` definitions describe the dictionaries for
+type checkers and IDEs.
+
+Every `info` dictionary has these stable fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `path` | `str` | Concrete prefill/compression path used |
+| `L` | `int` | Original prompt length in tokens |
+| `policy` | `PolicyInfo \| None` | Resolved policy; `None` only for `full` |
+| `model_id` | `str \| None` | Detected or explicitly supplied model ID |
+
+Mode-specific stable fields:
+
+| Mode | Additional fields |
+|---|---|
+| `stream` | `discovery`, `n_entities_hat`, `stats`, `logical_kv_mb_int8`, `use_int8` |
+| `posthoc` | `n_entities_hat`, `keep_count`, `cache_tokens`, `logical_kv_mb_int8`, `use_int8` |
+| `full` | `cache_tokens` |
+
+All stream `stats` dictionaries contain `stream_budget`, `final_budget`, and
+`n_compress`. Discovery-specific measurements such as `peak_cache`,
+`final_cache`, or `peak_cache_tokens` are optional fields in
+`CompressionStats`. `PolicyInfo` contains `R`, `budget`, `stream_budget`,
+`mode`, `note`, and `family`.
+
 **Family floors** (transfer-measured): Gemma-4 novelty stream ≥512 (valley/attn ~1024); Qwen2.5 posthoc ≥320 / stream ≥768 @8k+; Llama-3.2 posthoc ≥256.
 
 ## Practical length guide (single-needle, measured)

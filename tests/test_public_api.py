@@ -26,6 +26,14 @@ class PublicApiTests(unittest.TestCase):
         self.assertEqual(nlc.__version__, "0.1.1")
         self.assertTrue(callable(nlc.prefill_auto))
         self.assertTrue(callable(nlc.greedy_generate))
+        self.assertEqual(
+            nlc.PrefillInfo.__required_keys__,
+            frozenset({"path", "L", "policy", "model_id"}),
+        )
+        self.assertEqual(
+            nlc.CompressionStats.__required_keys__,
+            frozenset({"stream_budget", "final_budget", "n_compress"}),
+        )
 
     def test_default_policy_is_bounded(self) -> None:
         policy = nlc.policy_for(n_entities=1, L=4096, prefer_stream=True)

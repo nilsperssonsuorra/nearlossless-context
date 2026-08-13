@@ -59,6 +59,9 @@ packages = ["nearlossless_context"]
 package-dir = { nearlossless_context = "experiments" }
 license-files = ["LICENSE", "NOTICE"]
 
+[tool.setuptools.package-data]
+nearlossless_context = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

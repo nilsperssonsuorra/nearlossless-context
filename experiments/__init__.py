@@ -14,6 +14,7 @@ from .compress_adaptive import (
     prefill_stream_adaptive,
 )
 from .decode_utils import greedy_generate
+from .public_types import CompressionStats, PolicyInfo, PrefillInfo
 
 AdaptivePolicy = _adaptive.AdaptivePolicy
 policy_for = _adaptive.policy_for
@@ -21,6 +22,9 @@ policy_for = _adaptive.policy_for
 __all__ = [
     "AdaptivePolicy",
     "greedy_generate",
+    "CompressionStats",
+    "PolicyInfo",
+    "PrefillInfo",
     "policy_for",
     "prefill_auto",
     "prefill_posthoc_adaptive",

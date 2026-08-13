@@ -25,6 +25,7 @@ if __package__:
         prefill_streaming_valley,
     )
     from .snapkv import cache_seq_len, full_layer_h_kv, prefill_chunked
+    from .public_types import PrefillInfo
 else:
     from adaptive import (  # noqa: F401
         AdaptivePolicy,
@@ -39,6 +40,7 @@ else:
         prefill_streaming_valley,
     )
     from snapkv import cache_seq_len, full_layer_h_kv, prefill_chunked
+    from public_types import PrefillInfo
 
 
 def _resolve_model_id(model, model_id: str | None) -> str | None:
@@ -90,7 +92,7 @@ def prefill_posthoc_adaptive(
     score_layers: int = 8,
     use_int8: bool = False,
     model_id: str | None = None,
-) -> tuple[Any, torch.Tensor, dict]:
+) -> tuple[Any, torch.Tensor, PrefillInfo]:
     """
     Chunked full prefill → obs attention → estimate n_entities (optional) →
     adaptive R/budget → seed_valley compress.
@@ -194,7 +196,7 @@ def prefill_stream_adaptive(
     model_id: str | None = None,
     tokenizer=None,
     discovery: str = "novelty",
-) -> tuple[Any, torch.Tensor, dict]:
+) -> tuple[Any, torch.Tensor, PrefillInfo]:
     """
     Streaming compress with adaptive stream_budget.
 
@@ -344,7 +346,7 @@ def prefill_auto(
     model_id: str | None = None,
     tokenizer=None,
     discovery: str = "novelty",
-) -> tuple[Any, torch.Tensor, dict]:
+) -> tuple[Any, torch.Tensor, PrefillInfo]:
     """
     One-call entrypoint for “fit more context under 24GB”.
 
