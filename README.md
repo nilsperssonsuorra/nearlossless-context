@@ -187,7 +187,7 @@ The project is moving from a reproducible research prototype toward an integrati
 ### Integration work
 
 - [ ] Prototype integration with a vLLM-compatible KV-cache or attention extension point
-- [ ] Investigate an SGLang integration path
+- [ ] Investigate an SGLang integration path ([compatibility assessment](docs/integrations/sglang.md), [#4](https://github.com/nilsperssonsuorra/nearlossless-context/issues/4))
 - [ ] Add real quantized KV storage and kernel support
 - [ ] Extend evaluation across additional models, context lengths, and public datasets
 
